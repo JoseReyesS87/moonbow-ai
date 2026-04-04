@@ -40,6 +40,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # --- MODELOS ---
 class EmailSubscription(BaseModel):
     email: str
@@ -150,6 +151,22 @@ def get_shopify_recommendations(skin_tag):
     except Exception as e:
         print(f"Error Shopify: {e}")
         return []
+
+
+# --- RUTA: DIAGNOSTICO SHOPIFY ---
+@app.get("/debug/shopify/{tag}")
+async def debug_shopify(tag: str):
+    headers = {
+        "X-Shopify-Access-Token": SHOPIFY_TOKEN,
+        "Content-Type": "application/json"
+    }
+    tags_to_check = [tag, "grasa", "seca", "mixta", "sensible"]
+    result = {}
+    for t in tags_to_check:
+        r = requests.get(f"{BASE_URL}/products.json?tag={t}&limit=10", headers=headers, timeout=10)
+        products = r.json().get("products", []) if r.status_code == 200 else []
+        result[t] = [p["title"] for p in products]
+    return result
 
 
 # --- RUTA: ANALISIS ---
