@@ -242,8 +242,37 @@ async def analyze_skin(file: UploadFile = File(...)):
         elif "```" in res_text:
             res_text = res_text.split("```")[1].split("```")[0].strip()
 
-        analysis_data = json.loads(res_text)
-        print(f"Tipo: {analysis_data.get('tipo_piel')} | H:{analysis_data.get('hidratacion')} E:{analysis_data.get('elasticidad')} S:{analysis_data.get('sensibilidad')} Edad:{analysis_data.get('edad_piel')}")
+        analysis = extract_json(response.text)
+
+        # 🔁 retry si falla
+        if "error" in analysis:
+            print("⚠️ JSON inválido, reintentando...")
+
+            response = model.generate_content(
+                [
+                    prompt + "\nResponde SOLO en JSON válido. No agregues texto.",
+                    {"mime_type": "image/jpeg", "data": image_bytes}
+                ],
+                generation_config={
+                    "temperature": 0.1
+                }
+            )
+
+            analysis = extract_json(response.text)
+
+        # 🚨 fallback final (NUNCA CRASHEAR)
+        if "error" in analysis:
+            return {
+                "error": "analysis_failed"
+            }
+
+        # ✅ ahora sí es seguro usarlo
+        tipo_piel = analysis.get("tipo_piel_tag", "").lower()
+        print("Tipo:", analysis.get("tipo_piel"),
+            "| H:", analysis.get("hidratacion"),
+            "E:", analysis.get("elasticidad"),
+            "S:", analysis.get("sensibilidad"),
+            "Edad:", analysis.get("edad_piel"))
 
         recommendations = get_shopify_recommendations(analysis_data.get('tipo_piel_tag', ''))
 
