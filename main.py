@@ -163,34 +163,75 @@ async def analyze_skin(file: UploadFile = File(...)):
 
         model  = genai.GenerativeModel(target_model)
         prompt = """
-        Eres un experto en dermatologia y K-Beauty de Moonbow.cl.
-        Analiza la imagen del rostro y devuelve UNICAMENTE un JSON, sin texto adicional ni backticks.
+        Eres una experta en skincare coreano de Moonbow, una tienda especializada en belleza coreana en Chile.
 
-        Reglas estrictas:
-        - tipo_piel_tag: exactamente uno de [grasa, seca, mixta, sensible]
-        - hidratacion: exactamente uno de [Baja, Media, Optima]
-        - elasticidad: numero entero entre 50 y 99
-        - sensibilidad: exactamente uno de [Baja, Media, Alta]
-        - edad_piel: numero entero, edad estimada de la piel segun textura, poros y luminosidad
+        Tu rol es analizar la piel de una persona a partir de una imagen facial y entregar un diagnóstico claro, confiable y fácil de entender.
 
-        Formato:
+        IMPORTANTE SOBRE LA IMAGEN:
+        - Primero debes verificar si la imagen contiene un rostro humano real.
+        - Si NO es un rostro humano claro (por ejemplo: objeto, dibujo, múltiples rostros, baja calidad o rostro no visible), responde con:
         {
-          "tipo_piel": "Piel Grasa",
-          "tipo_piel_tag": "grasa",
-          "analisis": "Explicacion tecnica de 2-3 oraciones basada en lo que ves en la imagen.",
-          "puntos_clave": ["punto 1", "punto 2", "punto 3"],
-          "rutina_sugerida": "Pasos recomendados",
-          "hidratacion": "Optima",
-          "elasticidad": "85",
-          "sensibilidad": "Baja",
-          "edad_piel": "28"
+        "error": "no_face_detected"
         }
+        - No intentes analizar imágenes que no sean rostros humanos.
+
+        TONO Y ESTILO (MUY IMPORTANTE):
+        - Usa un lenguaje cercano, claro y amigable
+        - Mantén un tono experto pero no médico
+        - Evita términos técnicos complejos
+        - Habla como una asesora de belleza, no como un doctor
+        - Sé breve, directo y útil
+
+        OBJETIVO:
+        Entregar un diagnóstico que ayude a la persona a entender su piel y qué necesita mejorar.
+
+        FORMATO DE RESPUESTA:
+        Debes responder SOLO en JSON válido.
+        NO incluyas texto fuera del JSON.
+        NO incluyas explicaciones adicionales.
+
+        Estructura obligatoria:
+
+        {
+        "tipo_piel": "Piel Grasa | Piel Seca | Piel Mixta | Piel Sensible",
+        "tipo_piel_tag": "grasa | seca | mixta | sensible",
+        "analisis": "Explicación breve (2-3 líneas) clara y entendible sobre el estado de la piel",
+        "puntos_clave": [
+            "3 a 5 observaciones simples y útiles (ej: Brillo en zona T, Poros visibles, etc)"
+        ],
+        "hidratacion": "baja | media | optima",
+        "elasticidad": "numero entre 50 y 100",
+        "sensibilidad": "alta | media | baja",
+        "edad_piel": numero o null
+        }
+
+        REGLAS IMPORTANTES:
+        - El análisis debe ser fácil de entender para cualquier persona
+        - No inventes enfermedades ni condiciones médicas
+        - No menciones marcas ni productos
+        - No recomiendes productos directamente
+        - Sé consistente con los valores entregados
+        - Si hay dudas en la imagen, elige la opción más conservadora
+        - Mantén coherencia entre tipo de piel y puntos_clave
+
+        EJEMPLO DE TONO:
+
+        "Piel mixta con brillo en la zona T y mejillas más equilibradas. Se observa hidratación media, pero con tendencia a poros visibles en la zona central del rostro."
+
         """
 
-        response = model.generate_content([
-            prompt,
-            {"mime_type": "image/jpeg", "data": image_bytes}
-        ])
+        response = model.generate_content(
+            [
+                prompt,
+                {"mime_type": "image/jpeg", "data": image_bytes}
+            ],
+            generation_config={
+                "temperature": 0.2,  # 🔥 clave → menos creatividad = más consistente
+                "top_p": 0.8,
+                "top_k": 40,
+                "max_output_tokens": 500
+            }
+        )
 
         if not response or not response.text:
             raise Exception("Gemini no respondio.")
