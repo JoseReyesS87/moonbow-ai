@@ -25,19 +25,12 @@ MAILCHIMP_BASE_URL = f"https://{MAILCHIMP_DC}.api.mailchimp.com/3.0"
 genai.configure(api_key=GEMINI_API_KEY)
 
 # --- CORS ---
-
-origins = [
-    "http://localhost:5173",
-    "https://moonbow-skin-ai.vercel.app"
-]
-
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_origins=origins,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"]
 )
 
 # --- MODELOS ---
@@ -158,56 +151,82 @@ async def analyze_skin(file: UploadFile = File(...)):
     try:
         image_bytes = await file.read()
 
-        # 🔍 elegir modelo disponible
         available_models = [
             m.name for m in genai.list_models()
             if 'generateContent' in m.supported_generation_methods
         ]
-
         target_model = (
             'models/gemini-1.5-flash'
             if 'models/gemini-1.5-flash' in available_models
             else available_models[0]
         )
 
-        model = genai.GenerativeModel(target_model)
-
-        # 🧠 PROMPT
+        model  = genai.GenerativeModel(target_model)
         prompt = """
-Eres una experta en skincare coreano de Moonbow, una tienda especializada en belleza coreana en Chile.
+        Eres una experta en skincare coreano de Moonbow, una tienda especializada en belleza coreana en Chile.
 
-Tu rol es analizar la piel de una persona a partir de una imagen facial.
+        Tu rol es analizar la piel de una persona a partir de una imagen facial y entregar un diagnóstico claro, confiable y fácil de entender.
 
-IMPORTANTE SOBRE LA IMAGEN:
-- Si NO es un rostro humano claro, responde:
-{"error": "no_face_detected"}
+        IMPORTANTE SOBRE LA IMAGEN:
+        - Primero debes verificar si la imagen contiene un rostro humano real.
+        - Si NO es un rostro humano claro (por ejemplo: objeto, dibujo, múltiples rostros, baja calidad o rostro no visible), responde con:
+        {
+        "error": "no_face_detected"
+        }
+        - No intentes analizar imágenes que no sean rostros humanos.
 
-- Si la imagen tiene mala calidad o no permite análisis claro:
-{"error": "no_face_detected"}
+        TONO Y ESTILO (MUY IMPORTANTE):
+        - Usa un lenguaje cercano, claro y amigable
+        - Mantén un tono experto pero no médico
+        - Evita términos técnicos complejos
+        - Habla como una asesora de belleza, no como un doctor
+        - Sé breve, directo y útil
 
-FORMATO:
-Responde SOLO en JSON válido.
+        OBJETIVO:
+        Entregar un diagnóstico que ayude a la persona a entender su piel y qué necesita mejorar.
 
-{
-  "tipo_piel": "Piel Grasa | Piel Seca | Piel Mixta | Piel Sensible",
-  "tipo_piel_tag": "grasa | seca | mixta | sensible",
-  "analisis": "Explicación breve",
-  "puntos_clave": ["3 a 5 observaciones"],
-  "hidratacion": "baja | media | optima",
-  "elasticidad": "numero entre 50 y 100",
-  "sensibilidad": "alta | media | baja",
-  "edad_piel": numero o null
-}
-"""
+        FORMATO DE RESPUESTA:
+        Debes responder SOLO en JSON válido.
+        NO incluyas texto fuera del JSON.
+        NO incluyas explicaciones adicionales.
 
-        # 🔥 llamada a Gemini
+        Estructura obligatoria:
+
+        {
+        "tipo_piel": "Piel Grasa | Piel Seca | Piel Mixta | Piel Sensible",
+        "tipo_piel_tag": "grasa | seca | mixta | sensible",
+        "analisis": "Explicación breve (2-3 líneas) clara y entendible sobre el estado de la piel",
+        "puntos_clave": [
+            "3 a 5 observaciones simples y útiles (ej: Brillo en zona T, Poros visibles, etc)"
+        ],
+        "hidratacion": "baja | media | optima",
+        "elasticidad": "numero entre 50 y 100",
+        "sensibilidad": "alta | media | baja",
+        "edad_piel": numero o null
+        }
+
+        REGLAS IMPORTANTES:
+        - El análisis debe ser fácil de entender para cualquier persona
+        - No inventes enfermedades ni condiciones médicas
+        - No menciones marcas ni productos
+        - No recomiendes productos directamente
+        - Sé consistente con los valores entregados
+        - Si hay dudas en la imagen, elige la opción más conservadora
+        - Mantén coherencia entre tipo de piel y puntos_clave
+
+        EJEMPLO DE TONO:
+
+        "Piel mixta con brillo en la zona T y mejillas más equilibradas. Se observa hidratación media, pero con tendencia a poros visibles en la zona central del rostro."
+
+        """
+
         response = model.generate_content(
             [
                 prompt,
                 {"mime_type": "image/jpeg", "data": image_bytes}
             ],
             generation_config={
-                "temperature": 0.2,
+                "temperature": 0.2,  # 🔥 clave → menos creatividad = más consistente
                 "top_p": 0.8,
                 "top_k": 40,
                 "max_output_tokens": 500
@@ -215,62 +234,27 @@ Responde SOLO en JSON válido.
         )
 
         if not response or not response.text:
-            return {"error": "empty_response"}
+            raise Exception("Gemini no respondio.")
 
-        print("RAW GEMINI:", response.text)
+        res_text = response.text.strip()
+        if "```json" in res_text:
+            res_text = res_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in res_text:
+            res_text = res_text.split("```")[1].split("```")[0].strip()
 
-        # 🧩 parsing seguro
-        analysis = extract_json(response.text)
+        analysis_data = json.loads(res_text)
+        print(f"Tipo: {analysis_data.get('tipo_piel')} | H:{analysis_data.get('hidratacion')} E:{analysis_data.get('elasticidad')} S:{analysis_data.get('sensibilidad')} Edad:{analysis_data.get('edad_piel')}")
 
-        # 🔁 retry si falla
-        if "error" in analysis:
-            print("⚠️ JSON inválido, reintentando...")
+        recommendations = get_shopify_recommendations(analysis_data.get('tipo_piel_tag', ''))
 
-            response = model.generate_content(
-                [
-                    prompt + "\nResponde SOLO en JSON válido.",
-                    {"mime_type": "image/jpeg", "data": image_bytes}
-                ],
-                generation_config={
-                    "temperature": 0.1
-                }
-            )
-
-            analysis = extract_json(response.text)
-
-        # 🚨 fallback final
-        if "error" in analysis:
-            return {"error": "analysis_failed"}
-
-        # 🚨 si no hay rostro
-        if analysis.get("error") == "no_face_detected":
-            return {"error": "no_face_detected"}
-
-        # ✅ datos seguros
-        tipo_piel_tag = analysis.get("tipo_piel_tag", "").lower()
-
-        print(
-            "Tipo:", analysis.get("tipo_piel"),
-            "| H:", analysis.get("hidratacion"),
-            "| E:", analysis.get("elasticidad"),
-            "| S:", analysis.get("sensibilidad"),
-            "| Edad:", analysis.get("edad_piel")
-        )
-
-        # 🛒 recomendaciones
-        recommendations = get_shopify_recommendations(tipo_piel_tag)
-
-        # ✅ RESPUESTA FINAL LIMPIA
         return {
-            "result": analysis,
+            "result":   json.dumps(analysis_data),
             "products": recommendations
         }
 
     except Exception as e:
         print(f"Error critico: {str(e)}")
-        return {
-            "error": "server_error"
-        }
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # --- RUTA: SUSCRIPCION MAILCHIMP ---
