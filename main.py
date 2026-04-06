@@ -218,7 +218,7 @@ def get_products_by_collection(handle):
                     collection_type = "smart"
 
         if not collection_id:
-            print(f"  ❌ Colección '{handle}' NO encontrada (ni custom ni smart). HTTP status custom={res.status_code}")
+            print(f"  ❌ Colección '{handle}' NO encontrada (ni custom ni smart)")
             return []
 
         print(f"  ✅ Colección '{handle}' [{collection_type}] id={collection_id}")
@@ -231,7 +231,6 @@ def get_products_by_collection(handle):
         )
         products = res.json().get("products", [])
         print(f"     → {len(products)} productos encontrados")
-
         return products
 
     except Exception as e:
@@ -359,8 +358,7 @@ def get_shopify_recommendations(analysis):
             all_products.extend(get_products_by_collection(handle))
 
         if not all_products:
-            handles_str = ", ".join(handles)
-            print(f"⚠️  Sin productos en categoría: {category} (handles buscados: [{handles_str}])")
+            print(f"⚠️  Sin productos en categoría: {category}")
             continue
 
         # Eliminar duplicados por id
@@ -372,32 +370,28 @@ def get_shopify_recommendations(analysis):
                 seen_ids.add(pid)
                 unique_products.append(p)
 
-        # Filtrar solo los que tienen stock o no tienen tracking de inventario
+        # Filtrar productos disponibles (con stock o sin tracking de inventario)
         def is_available(p):
             variants = p.get("variants", [])
             if not variants:
                 return False
             v = variants[0]
-            # Si no trackea inventario (inventory_management=null), se asume disponible
-            if v.get("inventory_management") is None or v.get("inventory_management") == "":
-                return True
-            # Si trackea, verificar quantity > 0 o política "continue" (vender sin stock)
+            if v.get("inventory_management") in (None, ""):
+                return True  # sin tracking = disponible
             if v.get("inventory_policy") == "continue":
-                return True
+                return True  # vender aunque sin stock
             return v.get("inventory_quantity", 0) > 0
 
         with_stock = [p for p in unique_products if is_available(p)]
 
         if not with_stock:
-            # Log detallado para diagnosticar
             sample = unique_products[:2]
             for sp in sample:
                 v = sp.get("variants", [{}])[0]
-                print(f"  ⚠️  Stock 0: '{sp['title'][:40]}' "
+                print(f"  ⚠️  Sin stock: '{sp['title'][:35]}' "
                       f"inv_mgmt={v.get('inventory_management')} "
-                      f"qty={v.get('inventory_quantity')} "
-                      f"policy={v.get('inventory_policy')}")
-            print(f"⚠️  Sin stock en categoría: {category} ({len(unique_products)} prods sin stock)")
+                      f"qty={v.get('inventory_quantity')} policy={v.get('inventory_policy')}")
+            print(f"⚠️  Sin stock en categoría: {category}")
             continue
 
         # Puntuar todos los productos con stock
@@ -415,14 +409,14 @@ def get_shopify_recommendations(analysis):
         # Ordenar por score descendente
         scored.sort(key=lambda x: x["_score"], reverse=True)
 
+        # Loggear top 3 ANTES de hacer pop (_score se elimina del objeto compartido)
+        top_scores = [(p["title"][:40], p["_score"]) for p in scored[:3]]
+        print(f"  [{category}] top: {top_scores}")
+
         # Elegir el mejor y limpiar campo interno
         best = scored[0]
         best.pop("_score", None)
         final_products.append(best)
-
-        top_scores = [(p["title"][:40], p["_score"]) for p in scored[:3]] if len(scored) >= 3 else []
-        if top_scores:
-            print(f"  [{category}] top: {top_scores}")
 
     print(f"Productos finales: {len(final_products)} / {len(ROUTINE_ORDER)} categorías")
     return final_products
