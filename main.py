@@ -45,57 +45,103 @@ class EmailSubscription(BaseModel):
     skin_type: str
     skin_tag: str
     products: list
+    # Campos opcionales del analisis completo
+    analisis: str = ''
+    hidratacion: str = ''
+    sensibilidad: str = ''
+    elasticidad: int = 0
+    edad_piel: int = 0
+    puntos_clave: list = []
+    rutina_sugerida: str = ''
+    score: int = 0
 
 
 # --- MAILCHIMP ---
-def subscribe_to_mailchimp(email: str, skin_type: str, skin_tag: str, products: list):
+def subscribe_to_mailchimp(
+    email: str,
+    skin_type: str,
+    skin_tag: str,
+    products: list,
+    analisis: str = '',
+    hidratacion: str = '',
+    sensibilidad: str = '',
+    elasticidad: int = 0,
+    edad_piel: int = 0,
+    puntos_clave: list = None,
+    rutina_sugerida: str = '',
+    score: int = 0
+):
     headers = {
         "Authorization": f"Bearer {MAILCHIMP_API_KEY}",
         "Content-Type": "application/json"
     }
 
+    puntos_clave = puntos_clave or []
     email_hash    = hashlib.md5(email.lower().encode()).hexdigest()
-    product_names = " | ".join([p.get("title", "") for p in products[:3]])
+    product_names = " | ".join([p.get("title", "") for p in products[:4]])
+    puntos_str    = " | ".join(puntos_clave[:3])
     member_url    = f"{MAILCHIMP_BASE_URL}/lists/{MAILCHIMP_LIST_ID}/members/{email_hash}"
+
+    # Merge fields completos para personalizacion de emails
+    merge_fields = {
+        "SKIN_TYPE":   skin_type,           # ej: 'Piel Grasa'
+        "SKIN_TAG":    skin_tag,             # ej: 'grasa'
+        "PRODUCTS":    product_names,        # primeros 4 productos
+        "ANALISIS":    analisis[:500] if analisis else '',   # diagnostico resumido
+        "HIDRATACION": hidratacion,          # Baja / Media / Optima
+        "SENSIBILIDAD":sensibilidad,         # Baja / Media / Alta
+        "ELASTICIDAD": str(elasticidad) if elasticidad else '',
+        "EDAD_PIEL":   str(edad_piel) if edad_piel else '',
+        "PUNTOS":      puntos_str,           # puntos clave del analisis
+        "RUTINA":      rutina_sugerida[:400] if rutina_sugerida else '',
+        "SCORE":       str(score) if score else '',
+    }
+
+    # Tags para segmentacion y automatizaciones
+    tags_to_apply = [
+        {"name": f"piel-{skin_tag}",   "status": "active"},
+        {"name": "analizador-ia",       "status": "active"},
+        {"name": "analisis-completado", "status": "active"},
+    ]
+    if hidratacion.lower() == 'baja':
+        tags_to_apply.append({"name": "hidratacion-baja", "status": "active"})
+    if sensibilidad.lower() == 'alta':
+        tags_to_apply.append({"name": "piel-sensible", "status": "active"})
+    if edad_piel and edad_piel >= 30:
+        tags_to_apply.append({"name": "anti-edad", "status": "active"})
+    if score and score < 60:
+        tags_to_apply.append({"name": "score-bajo", "status": "active"})
 
     check = requests.get(member_url, headers=headers)
 
     if check.status_code == 200:
-        # Contacto existente: actualizar sin disparar bienvenida
+        # Contacto existente: actualizar datos y agregar nuevo tag de analisis
         current_status = check.json().get("status", "subscribed")
         requests.patch(member_url, headers=headers, json={
-            "status": current_status,
-            "merge_fields": {
-                "SKIN_TYPE": skin_type,
-                "PRODUCTS":  product_names,
-            }
+            "status":       current_status,
+            "merge_fields": merge_fields
         })
-        requests.post(f"{member_url}/tags", headers=headers, json={
-            "tags": [{"name": f"piel-{skin_tag}", "status": "active"}]
-        })
-        print(f"Mailchimp: contacto existente actualizado ({email})")
+        requests.post(f"{member_url}/tags", headers=headers, json={"tags": tags_to_apply})
+        print(f"Mailchimp: contacto actualizado ({email}) tag=piel-{skin_tag} score={score}")
         return {"status": "updated", "message": "Contacto existente actualizado"}
 
     else:
-        # Nuevo contacto: disparar bienvenida
+        # Nuevo contacto
         res = requests.post(
             f"{MAILCHIMP_BASE_URL}/lists/{MAILCHIMP_LIST_ID}/members",
             headers=headers,
             json={
                 "email_address": email,
-                "status": "subscribed",
-                "merge_fields": {
-                    "SKIN_TYPE": skin_type,
-                    "PRODUCTS":  product_names,
-                },
-                "tags": [f"piel-{skin_tag}", "analizador-ia"]
+                "status":        "subscribed",
+                "merge_fields":  merge_fields,
+                "tags":          [t["name"] for t in tags_to_apply]
             }
         )
         if res.status_code in [200, 204]:
-            print(f"Mailchimp: nuevo contacto suscrito ({email})")
+            print(f"Mailchimp: nuevo contacto ({email}) tag=piel-{skin_tag} score={score}")
             return {"status": "subscribed", "message": "Nuevo contacto agregado"}
         else:
-            print(f"Mailchimp error: {res.text}")
+            print(f"Mailchimp error {res.status_code}: {res.text}")
             return {"status": "error", "message": res.text}
 
 # --- COLECCIONES SHOPIFY ---
@@ -422,6 +468,40 @@ def get_shopify_recommendations(analysis):
     return final_products
 
 
+# --- RUTA: DIAGNOSTICO GEMINI ---
+@app.get("/debug/gemini")
+async def debug_gemini():
+    try:
+        available = [
+            m.name for m in genai.list_models()
+            if 'generateContent' in m.supported_generation_methods
+        ]
+        results = {}
+        test_models = [
+            'models/gemini-2.5-flash',
+            'models/gemini-2.0-flash',
+            'models/gemini-1.5-flash',
+            'models/gemini-1.5-flash-8b',
+        ]
+        for model_name in test_models:
+            if model_name not in available:
+                results[model_name] = "no disponible"
+                continue
+            try:
+                m = genai.GenerativeModel(model_name)
+                r = m.generate_content("Responde solo: ok")
+                results[model_name] = "ok" if r and r.text else "sin respuesta"
+            except Exception as e:
+                err = str(e)
+                if "429" in err or "quota" in err.lower():
+                    results[model_name] = "quota excedida"
+                else:
+                    results[model_name] = f"error: {err[:80]}"
+        return {"available_models": available, "quota_check": results}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 # --- RUTA: DIAGNOSTICO SHOPIFY ---
 @app.get("/debug/shopify/{tag}")
 async def debug_shopify(tag: str):
@@ -576,7 +656,15 @@ async def subscribe(data: EmailSubscription):
             email=data.email,
             skin_type=data.skin_type,
             skin_tag=data.skin_tag,
-            products=data.products
+            products=data.products,
+            analisis=data.analisis,
+            hidratacion=data.hidratacion,
+            sensibilidad=data.sensibilidad,
+            elasticidad=data.elasticidad,
+            edad_piel=data.edad_piel,
+            puntos_clave=data.puntos_clave,
+            rutina_sugerida=data.rutina_sugerida,
+            score=data.score
         )
         return result
     except Exception as e:
