@@ -98,8 +98,27 @@ def subscribe_to_mailchimp(email: str, skin_type: str, skin_tag: str, products: 
             print(f"Mailchimp error: {res.text}")
             return {"status": "error", "message": res.text}
 
+import re
+
+def extract_json(text):
+    try:
+        # intenta parse directo
+        return json.loads(text)
+    except:
+        pass
+
+    try:
+        # intenta extraer bloque JSON
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+    except:
+        pass
+
+    print("⚠️ No se pudo parsear JSON")
+    return {}
+
 # FUNCION PARA EXTRAER LAS NECESIDADES DE LA PIEL
-# --- NUEVA FUNCION (AGREGAR ARRIBA DE SHOPIFY) ---
 def extract_skin_needs(analysis):
     needs = []
 
