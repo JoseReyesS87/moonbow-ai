@@ -134,22 +134,50 @@ def extract_json(text):
 def extract_skin_needs(analysis):
     needs = []
 
-    if analysis.get("hidratacion", "").lower() == "baja":
+    hidratacion = analysis.get("hidratacion", "").lower()
+    if hidratacion == "baja":
         needs.append("hidratacion")
+    elif hidratacion == "media":
+        needs.append("hidratacion")  # igual incluir, es un need relevante
 
-    if analysis.get("sensibilidad", "").lower() == "alta":
+    sensibilidad = analysis.get("sensibilidad", "").lower()
+    if sensibilidad == "alta":
         needs.append("calmante")
+        needs.append("sensible")
 
-    puntos = " ".join(analysis.get("puntos_clave", [])).lower()
+    tipo_piel = analysis.get("tipo_piel_tag", "").lower()
+    if tipo_piel in ["grasa", "mixta"]:
+        needs.append("poros")
+        needs.append("sebo")
+    if tipo_piel == "seca":
+        needs.append("hidratacion")
+        needs.append("nutricion")
+
+    edad_piel = int(analysis.get("edad_piel", 30))
+    if edad_piel >= 30:
+        needs.append("anti-edad")
+        needs.append("firmeza")
+
+    rutina = analysis.get("rutina_sugerida", "").lower()
+    puntos = " ".join(analysis.get("puntos_clave", [])).lower() + " " + rutina
 
     if "poro" in puntos:
         needs.append("poros")
-
-    if "arruga" in puntos or "linea" in puntos:
+    if "arruga" in puntos or "linea" in puntos or "firmeza" in puntos:
         needs.append("anti-edad")
-
-    if "mancha" in puntos:
+        needs.append("firmeza")
+    if "mancha" in puntos or "uniform" in puntos:
         needs.append("manchas")
+        needs.append("iluminador")
+    if "acne" in puntos or "acné" in puntos or "grano" in puntos:
+        needs.append("acne")
+    if "brillo" in puntos or "grasa" in puntos or "sebo" in puntos:
+        needs.append("sebo")
+        needs.append("poros")
+    if "hidrat" in puntos or "seca" in puntos or "tension" in puntos:
+        needs.append("hidratacion")
+    if "rojez" in puntos or "irritad" in puntos or "calm" in puntos:
+        needs.append("calmante")
 
     return list(set(needs))
 
@@ -187,83 +215,174 @@ def get_products_by_collection(handle):
         print(f"Error colección {handle}: {e}")
         return []
 # --- SHOPIFY ---
+
+# Orden canónico de la rutina (determina el orden de presentación al usuario)
+ROUTINE_ORDER = [
+    "oil-cleanser",
+    "foam-cleanser",
+    "toner",
+    "serum",
+    "eye-cream",
+    "moisturizer",
+    "sunscreen",
+]
+
+# Tags de tipo de piel compatibles por tipo principal (fallback)
+SKIN_TYPE_COMPATIBILITY = {
+    "grasa":    ["grasa", "mixta", "normal"],
+    "mixta":    ["mixta", "grasa", "normal"],
+    "seca":     ["seca", "normal", "sensible"],
+    "sensible": ["sensible", "seca", "normal"],
+    "normal":   ["normal", "mixta", "seca", "grasa"],
+}
+
+def score_product(p, tipo_piel, needs, category):
+    """
+    Devuelve un score numérico para un producto dado el tipo de piel y las necesidades.
+    Mayor score = mejor recomendación.
+    """
+    tags = [t.lower().strip() for t in p.get("tags", "").split(",")]
+    score = 0
+
+    # 1. Coincidencia de tipo de piel (ponderación máxima)
+    compatible = SKIN_TYPE_COMPATIBILITY.get(tipo_piel, [tipo_piel])
+    if tipo_piel and tipo_piel in tags:
+        score += 20              # match exacto
+    elif any(t in tags for t in compatible):
+        score += 10              # match compatible
+    elif "todo-tipo" in tags or "all-skin" in tags or "all skin" in tags:
+        score += 8               # apto para todo tipo
+    # Si no hay ningún match de tipo de piel, igual sigue (no se descarta)
+
+    # 2. Necesidades de la piel
+    for need in needs:
+        if need in tags:
+            score += 5
+
+    # 3. Best seller / destacado
+    if "best-seller" in tags or "bestseller" in tags:
+        score += 8
+    if "destacado" in tags or "featured" in tags:
+        score += 4
+
+    # 4. Stock suficiente (favorece productos con más stock)
+    variants = p.get("variants", [])
+    if variants:
+        v = variants[0]
+        qty = v.get("inventory_quantity", 0)
+        if qty > 20:
+            score += 3
+        elif qty > 5:
+            score += 1
+
+    # 5. Tiene imagen (mejor UX)
+    if p.get("image") or p.get("images"):
+        score += 2
+
+    return score
+
+
+def build_product_entry(p, category):
+    """Construye el dict de producto para la respuesta."""
+    variants = p.get("variants", [])
+    if not variants:
+        return None
+    v = variants[0]
+    if v.get("inventory_quantity", 0) <= 0:
+        return None
+
+    image_url = None
+    if p.get("image"):
+        image_url = p["image"]["src"]
+    elif p.get("images"):
+        image_url = p["images"][0]["src"]
+
+    return {
+        "title":      p["title"],
+        "variant_id": str(v["id"]),
+        "price":      v["price"],
+        "image":      image_url,
+        "handle":     p["handle"],
+        "category":   category,
+    }
+
+
 def get_shopify_recommendations(analysis):
-    tipo_piel = analysis.get("tipo_piel_tag", "").lower()
-    needs = extract_skin_needs(analysis)
+    tipo_piel = analysis.get("tipo_piel_tag", "").lower().strip()
+    needs     = extract_skin_needs(analysis)
 
     print(f"Tipo piel: {tipo_piel}")
     print(f"Needs detectados: {needs}")
 
-    # 🔥 lógica doble limpieza
-    include_oil = False
-    if tipo_piel in ["grasa", "mixta"]:
-        include_oil = True
-    if any(n in ["poros", "acne", "sebo"] for n in needs):
-        include_oil = True
+    # Decide si incluir oil cleanser (doble limpieza)
+    include_oil = tipo_piel in ["grasa", "mixta"] or any(
+        n in ["poros", "sebo", "acne"] for n in needs
+    )
 
     final_products = []
 
-    for category, handles in COLLECTIONS.items():
+    for category in ROUTINE_ORDER:
 
-        # 🚫 saltar oil cleanser si no aplica
         if category == "oil-cleanser" and not include_oil:
             continue
 
-        all_products = []
+        handles = COLLECTIONS.get(category, [])
+        if not handles:
+            continue
 
+        # Recolectar todos los productos de la categoría
+        all_products = []
         for handle in handles:
             all_products.extend(get_products_by_collection(handle))
 
-        scored = []
+        if not all_products:
+            print(f"⚠️  Sin productos en categoría: {category}")
+            continue
 
+        # Eliminar duplicados por id
+        seen_ids = set()
+        unique_products = []
         for p in all_products:
-            variants = p.get('variants', [])
-            if not variants:
-                continue
+            pid = p.get("id")
+            if pid not in seen_ids:
+                seen_ids.add(pid)
+                unique_products.append(p)
 
-            v = variants[0]
-            if v.get('inventory_quantity', 0) <= 0:
-                continue
+        # Filtrar solo los que tienen stock
+        with_stock = [
+            p for p in unique_products
+            if p.get("variants") and p["variants"][0].get("inventory_quantity", 0) > 0
+        ]
 
-            tags = [t.lower().strip() for t in p.get("tags", "").split(",")]
+        if not with_stock:
+            print(f"⚠️  Sin stock en categoría: {category}")
+            continue
 
-            # 🔥 filtro por tipo de piel
-            if tipo_piel and tipo_piel not in tags:
-                continue
+        # Puntuar todos los productos con stock
+        scored = []
+        for p in with_stock:
+            s = score_product(p, tipo_piel, needs, category)
+            entry = build_product_entry(p, category)
+            if entry:
+                entry["_score"] = s
+                scored.append(entry)
 
-            score = 5  # base
+        if not scored:
+            continue
 
-            # 🔥 necesidades
-            for need in needs:
-                if need in tags:
-                    score += 3
+        # Ordenar por score descendente
+        scored.sort(key=lambda x: x["_score"], reverse=True)
 
-            if "best-seller" in tags:
-                score += 2
+        # Elegir el mejor y limpiar campo interno
+        best = scored[0]
+        best.pop("_score", None)
+        final_products.append(best)
 
-            image_url = None
-            if p.get('image'):
-                image_url = p['image']['src']
-            elif p.get('images'):
-                image_url = p['images'][0]['src']
+        top_scores = [(p["title"][:40], p["_score"]) for p in scored[:3]] if len(scored) >= 3 else []
+        if top_scores:
+            print(f"  [{category}] top: {top_scores}")
 
-            scored.append({
-                "title": p['title'],
-                "variant_id": str(v['id']),
-                "price": v['price'],
-                "image": image_url,
-                "handle": p['handle'],
-                "category": category,
-                "score": score
-            })
-
-        # 🔥 elegir el mejor producto de esa categoría
-        if scored:
-            scored.sort(key=lambda x: x["score"], reverse=True)
-            final_products.append(scored[0])
-
-    print(f"Productos finales: {len(final_products)}")
-
+    print(f"Productos finales: {len(final_products)} / {len(ROUTINE_ORDER)} categorías")
     return final_products
 
 
@@ -279,8 +398,27 @@ async def debug_shopify(tag: str):
     for t in tags_to_check:
         r = requests.get(f"{BASE_URL}/products.json?tag={t}&limit=10", headers=headers, timeout=10)
         products = r.json().get("products", []) if r.status_code == 200 else []
-        result[t] = [p["title"] for p in products]
+        result[t] = [{"title": p["title"], "tags": p.get("tags", "")} for p in products]
     return result
+
+
+@app.get("/debug/collections")
+async def debug_collections():
+    """Ver qué productos hay en cada colección con sus tags y stock."""
+    report = {}
+    for category, handles in COLLECTIONS.items():
+        report[category] = {}
+        for handle in handles:
+            products = get_products_by_collection(handle)
+            report[category][handle] = [
+                {
+                    "title": p["title"],
+                    "tags": p.get("tags", ""),
+                    "stock": p["variants"][0].get("inventory_quantity", 0) if p.get("variants") else 0
+                }
+                for p in products[:10]
+            ]
+    return report
 
 
 # --- RUTA: ANALISIS ---
