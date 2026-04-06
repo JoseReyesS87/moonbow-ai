@@ -257,13 +257,17 @@ async def analyze_skin(file: UploadFile = File(...)):
         elif "```" in res_text:
             res_text = res_text.split("```")[1].split("```")[0].strip()
 
-        analysis_data = json.loads(res_text)
+        analysis_data = extract_json(res_text)
+
+        if not isinstance(analysis_data, dict):
+            print("⚠️ JSON inválido")
+            return {"error": "analysis_failed"}
         print(f"Tipo: {analysis_data.get('tipo_piel')} | H:{analysis_data.get('hidratacion')} E:{analysis_data.get('elasticidad')} S:{analysis_data.get('sensibilidad')} Edad:{analysis_data.get('edad_piel')}")
 
-        recommendations = get_shopify_recommendations(analysis_data.get('tipo_piel_tag', ''))
+        recommendations = get_shopify_recommendations(analysis_data)
 
         return {
-            "result":   json.dumps(analysis_data),
+            "result": analysis_data,
             "products": recommendations
         }
 
