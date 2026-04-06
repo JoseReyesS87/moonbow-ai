@@ -190,33 +190,38 @@ def get_products_by_collection(handle):
 
     try:
         collection_id = None
+        collection_type = None
 
-        # 1. Buscar en custom_collections
+        # 1. Buscar en custom_collections (manuales)
         res = requests.get(
             f"{BASE_URL}/custom_collections.json?handle={handle}",
             headers=headers,
             timeout=10
         )
-        custom = res.json().get("custom_collections", [])
-        if custom:
-            collection_id = custom[0]["id"]
-            print(f"  [colección] '{handle}' encontrada como custom_collection (id={collection_id})")
+        if res.status_code == 200:
+            custom = res.json().get("custom_collections", [])
+            if custom:
+                collection_id = custom[0]["id"]
+                collection_type = "custom"
 
-        # 2. Si no se encontró, buscar en smart_collections
+        # 2. Si no se encontró, buscar en smart_collections (automáticas)
         if not collection_id:
             res = requests.get(
                 f"{BASE_URL}/smart_collections.json?handle={handle}",
                 headers=headers,
                 timeout=10
             )
-            smart = res.json().get("smart_collections", [])
-            if smart:
-                collection_id = smart[0]["id"]
-                print(f"  [colección] '{handle}' encontrada como smart_collection (id={collection_id})")
+            if res.status_code == 200:
+                smart = res.json().get("smart_collections", [])
+                if smart:
+                    collection_id = smart[0]["id"]
+                    collection_type = "smart"
 
         if not collection_id:
-            print(f"  [colección] '{handle}' NO encontrada en custom ni smart collections")
+            print(f"  ❌ Colección '{handle}' NO encontrada (ni custom ni smart). HTTP status custom={res.status_code}")
             return []
+
+        print(f"  ✅ Colección '{handle}' [{collection_type}] id={collection_id}")
 
         # 3. Obtener productos de la colección
         res = requests.get(
@@ -224,13 +229,13 @@ def get_products_by_collection(handle):
             headers=headers,
             timeout=10
         )
-
         products = res.json().get("products", [])
-        print(f"  [colección] '{handle}' → {len(products)} productos")
+        print(f"     → {len(products)} productos encontrados")
+
         return products
 
     except Exception as e:
-        print(f"Error colección {handle}: {e}")
+        print(f"  ❌ Error colección '{handle}': {e}")
         return []
 # --- SHOPIFY ---
 
@@ -331,8 +336,6 @@ def get_shopify_recommendations(analysis):
 
     print(f"Tipo piel: {tipo_piel}")
     print(f"Needs detectados: {needs}")
-    if not needs:
-        print("  ⚠️  Sin needs — se recomendará por tipo de piel solamente")
 
     # Decide si incluir oil cleanser (doble limpieza)
     include_oil = tipo_piel in ["grasa", "mixta"] or any(
@@ -356,7 +359,8 @@ def get_shopify_recommendations(analysis):
             all_products.extend(get_products_by_collection(handle))
 
         if not all_products:
-            print(f"⚠️  Sin productos en categoría: {category}")
+            handles_str = ", ".join(handles)
+            print(f"⚠️  Sin productos en categoría: {category} (handles buscados: [{handles_str}])")
             continue
 
         # Eliminar duplicados por id
@@ -368,14 +372,32 @@ def get_shopify_recommendations(analysis):
                 seen_ids.add(pid)
                 unique_products.append(p)
 
-        # Filtrar solo los que tienen stock
-        with_stock = [
-            p for p in unique_products
-            if p.get("variants") and p["variants"][0].get("inventory_quantity", 0) > 0
-        ]
+        # Filtrar solo los que tienen stock o no tienen tracking de inventario
+        def is_available(p):
+            variants = p.get("variants", [])
+            if not variants:
+                return False
+            v = variants[0]
+            # Si no trackea inventario (inventory_management=null), se asume disponible
+            if v.get("inventory_management") is None or v.get("inventory_management") == "":
+                return True
+            # Si trackea, verificar quantity > 0 o política "continue" (vender sin stock)
+            if v.get("inventory_policy") == "continue":
+                return True
+            return v.get("inventory_quantity", 0) > 0
+
+        with_stock = [p for p in unique_products if is_available(p)]
 
         if not with_stock:
-            print(f"⚠️  Sin stock en categoría: {category}")
+            # Log detallado para diagnosticar
+            sample = unique_products[:2]
+            for sp in sample:
+                v = sp.get("variants", [{}])[0]
+                print(f"  ⚠️  Stock 0: '{sp['title'][:40]}' "
+                      f"inv_mgmt={v.get('inventory_management')} "
+                      f"qty={v.get('inventory_quantity')} "
+                      f"policy={v.get('inventory_policy')}")
+            print(f"⚠️  Sin stock en categoría: {category} ({len(unique_products)} prods sin stock)")
             continue
 
         # Puntuar todos los productos con stock
