@@ -25,22 +25,19 @@ MAILCHIMP_BASE_URL = f"https://{MAILCHIMP_DC}.api.mailchimp.com/3.0"
 genai.configure(api_key=GEMINI_API_KEY)
 
 # --- CORS ---
-
-origins = [
-    "http://localhost:5173",  # desarrollo
-    "https://moonbow-skin-ai.vercel.app",  # frontend real
-    "https://moonbow.cl",  # Shopify
-    "https://www.moonbow.cl"  # importante también
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[
+        "http://localhost:5173",
+        "https://moonbow-skin-ai.vercel.app",
+        "https://moonbow.cl",
+        "https://www.moonbow.cl"
+    ],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 # --- MODELOS ---
 class EmailSubscription(BaseModel):
