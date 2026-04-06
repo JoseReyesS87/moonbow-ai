@@ -98,6 +98,30 @@ def subscribe_to_mailchimp(email: str, skin_type: str, skin_tag: str, products: 
             print(f"Mailchimp error: {res.text}")
             return {"status": "error", "message": res.text}
 
+# FUNCION PARA EXTRAER LAS NECESIDADES DE LA PIEL
+# --- NUEVA FUNCION (AGREGAR ARRIBA DE SHOPIFY) ---
+def extract_skin_needs(analysis):
+    needs = []
+
+    if analysis.get("hidratacion", "").lower() == "baja":
+        needs.append("hidratacion")
+
+    if analysis.get("sensibilidad", "").lower() == "alta":
+        needs.append("calmante")
+
+    puntos = " ".join(analysis.get("puntos_clave", [])).lower()
+
+    if "poro" in puntos:
+        needs.append("poros")
+
+    if "arruga" in puntos or "linea" in puntos:
+        needs.append("anti-edad")
+
+    if "mancha" in puntos:
+        needs.append("manchas")
+
+    return list(set(needs))
+
 
 # --- SHOPIFY ---
 def get_shopify_recommendations(analysis):
@@ -113,7 +137,6 @@ def get_shopify_recommendations(analysis):
     print(f"Needs detectados: {needs}")
 
     try:
-        # 🔥 seguimos usando filtro base por tipo de piel
         response = requests.get(
             f"{BASE_URL}/products.json?tag={tipo_piel}&limit=50",
             headers=headers,
@@ -136,23 +159,25 @@ def get_shopify_recommendations(analysis):
             if v.get('inventory_quantity', 0) <= 0:
                 continue
 
-            tags = [t.lower() for t in p.get("tags", "").split(",")]
+            # 🔥 FIX: strip + lower
+            tags = [t.strip().lower() for t in p.get("tags", "").split(",")]
 
-            # ❌ seguridad: evitar productos de otro tipo de piel
             if tipo_piel not in tags:
                 continue
 
             score = 0
 
-            # 🧴 base (tipo piel)
+            # base
             score += 5
 
-            # 💧 necesidades
+            # 🔥 FIX: mejor scoring
             for need in needs:
                 if need in tags:
-                    score += 3
+                    score += 4
+                else:
+                    score -= 1
 
-            # ⭐ bonus
+            # bonus
             if "best-seller" in tags:
                 score += 2
 
@@ -172,12 +197,10 @@ def get_shopify_recommendations(analysis):
                 "score": score
             })
 
-        # 🔥 ordenar por score
         scored_products.sort(key=lambda x: x["score"], reverse=True)
 
         print(f"Productos rankeados: {len(scored_products)}")
 
-        # devolver top 6
         return scored_products[:6]
 
     except Exception as e:
@@ -260,10 +283,21 @@ async def analyze_skin(file: UploadFile = File(...)):
         analysis_data = extract_json(res_text)
 
         if not isinstance(analysis_data, dict):
-            print("⚠️ JSON inválido")
             return {"error": "analysis_failed"}
-        print(f"Tipo: {analysis_data.get('tipo_piel')} | H:{analysis_data.get('hidratacion')} E:{analysis_data.get('elasticidad')} S:{analysis_data.get('sensibilidad')} Edad:{analysis_data.get('edad_piel')}")
 
+        # 🔧 normalizar tipos
+        analysis_data["elasticidad"] = int(analysis_data.get("elasticidad", 70))
+        analysis_data["edad_piel"] = int(analysis_data.get("edad_piel", 30))
+
+        print(
+            f"Tipo: {analysis_data.get('tipo_piel')} | "
+            f"H:{analysis_data.get('hidratacion')} "
+            f"E:{analysis_data.get('elasticidad')} "
+            f"S:{analysis_data.get('sensibilidad')} "
+            f"Edad:{analysis_data.get('edad_piel')}"
+        )
+
+        # 🔥 FIX IMPORTANTE
         recommendations = get_shopify_recommendations(analysis_data)
 
         return {
