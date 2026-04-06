@@ -463,17 +463,23 @@ async def analyze_skin(file: UploadFile = File(...)):
     try:
         image_bytes = await file.read()
 
+        # Modelos en orden de preferencia (fallback automático si hay quota excedida)
+        MODEL_PRIORITY = [
+            'models/gemini-2.0-flash',
+            'models/gemini-1.5-flash',
+            'models/gemini-1.5-flash-8b',
+        ]
+
         available_models = [
             m.name for m in genai.list_models()
             if 'generateContent' in m.supported_generation_methods
         ]
-        target_model = (
-            'models/gemini-1.5-flash'
-            if 'models/gemini-1.5-flash' in available_models
-            else available_models[0]
+        target_model = next(
+            (m for m in MODEL_PRIORITY if m in available_models),
+            available_models[0] if available_models else 'models/gemini-1.5-flash'
         )
+        print(f"Modelo seleccionado: {target_model}")
 
-        model  = genai.GenerativeModel(target_model)
         prompt = """
         Eres un experto en dermatologia y K-Beauty de Moonbow.cl.
         Analiza la imagen del rostro y devuelve UNICAMENTE un JSON, sin texto adicional ni backticks.
@@ -499,13 +505,32 @@ async def analyze_skin(file: UploadFile = File(...)):
         }
         """
 
-        response = model.generate_content([
-            prompt,
-            {"mime_type": "image/jpeg", "data": image_bytes}
-        ])
+        # Intentar con cada modelo hasta que uno funcione
+        response = None
+        last_error = None
+        models_to_try = [target_model] + [m for m in MODEL_PRIORITY if m != target_model and m in available_models]
+
+        for model_name in models_to_try:
+            try:
+                print(f"Intentando con modelo: {model_name}")
+                m = genai.GenerativeModel(model_name)
+                response = m.generate_content([
+                    prompt,
+                    {"mime_type": "image/jpeg", "data": image_bytes}
+                ])
+                if response and response.text:
+                    print(f"✅ Respuesta ok con {model_name}")
+                    break
+            except Exception as model_err:
+                last_error = model_err
+                err_str = str(model_err)
+                if "429" in err_str or "quota" in err_str.lower() or "exceeded" in err_str.lower():
+                    print(f"⚠️ Quota excedida en {model_name}, probando siguiente...")
+                    continue
+                raise  # error distinto, no reintentar
 
         if not response or not response.text:
-            raise Exception("Gemini no respondio.")
+            raise Exception(f"Todos los modelos fallaron. Último error: {last_error}")
 
         res_text = response.text.strip()
         if "```json" in res_text:
