@@ -98,6 +98,18 @@ def subscribe_to_mailchimp(email: str, skin_type: str, skin_tag: str, products: 
             print(f"Mailchimp error: {res.text}")
             return {"status": "error", "message": res.text}
 
+# --- COLECCIONES SHOPIFY ---
+COLLECTIONS = {
+    "oil-cleanser": ["limpiadores-oleosos-desmaquillantes"],
+    "foam-cleanser": ["limpiador-en-espuma"],
+    "toner": ["tonicos"],
+    "serum": ["serum"],
+    "eye-cream": ["contorno-de-ojos"],
+    "moisturizer": ["cremas-y-lociones"],
+    "sunscreen": ["protector-solar"]
+}
+
+# FUNCION PARA EXTRAER EL JSON DE LA RESPUESTA DE GEMINI
 import re
 
 def extract_json(text):
@@ -141,35 +153,70 @@ def extract_skin_needs(analysis):
 
     return list(set(needs))
 
-
-# --- SHOPIFY ---
-def get_shopify_recommendations(analysis):
+# --- FUNCION PARA OBTENER LOS PRODUCTOS DE LAS COLECCIONES SHOPIFY ---
+def get_products_by_collection(handle):
     headers = {
         "X-Shopify-Access-Token": SHOPIFY_TOKEN,
         "Content-Type": "application/json"
     }
 
-    tipo_piel = analysis.get("tipo_piel_tag", "").lower().strip()
+    try:
+        # obtener collection id
+        res = requests.get(
+            f"{BASE_URL}/custom_collections.json?handle={handle}",
+            headers=headers,
+            timeout=10
+        )
+
+        collections = res.json().get("custom_collections", [])
+        if not collections:
+            return []
+
+        collection_id = collections[0]["id"]
+
+        # obtener productos
+        res = requests.get(
+            f"{BASE_URL}/products.json?collection_id={collection_id}&limit=50",
+            headers=headers,
+            timeout=10
+        )
+
+        return res.json().get("products", [])
+
+    except Exception as e:
+        print(f"Error colección {handle}: {e}")
+        return []
+# --- SHOPIFY ---
+def get_shopify_recommendations(analysis):
+    tipo_piel = analysis.get("tipo_piel_tag", "").lower()
     needs = extract_skin_needs(analysis)
 
     print(f"Tipo piel: {tipo_piel}")
     print(f"Needs detectados: {needs}")
 
-    try:
-        response = requests.get(
-            f"{BASE_URL}/products.json?tag={tipo_piel}&limit=50",
-            headers=headers,
-            timeout=10
-        )
+    # 🔥 lógica doble limpieza
+    include_oil = False
+    if tipo_piel in ["grasa", "mixta"]:
+        include_oil = True
+    if any(n in ["poros", "acne", "sebo"] for n in needs):
+        include_oil = True
 
-        if response.status_code != 200:
-            print(f"Error Shopify: {response.status_code}")
-            return []
+    final_products = []
 
-        products = response.json().get('products', [])
-        scored_products = []
+    for category, handles in COLLECTIONS.items():
 
-        for p in products:
+        # 🚫 saltar oil cleanser si no aplica
+        if category == "oil-cleanser" and not include_oil:
+            continue
+
+        all_products = []
+
+        for handle in handles:
+            all_products.extend(get_products_by_collection(handle))
+
+        scored = []
+
+        for p in all_products:
             variants = p.get('variants', [])
             if not variants:
                 continue
@@ -178,25 +225,19 @@ def get_shopify_recommendations(analysis):
             if v.get('inventory_quantity', 0) <= 0:
                 continue
 
-            # 🔥 FIX: strip + lower
-            tags = [t.strip().lower() for t in p.get("tags", "").split(",")]
+            tags = [t.lower().strip() for t in p.get("tags", "").split(",")]
 
-            if tipo_piel not in tags:
+            # 🔥 filtro por tipo de piel
+            if tipo_piel and tipo_piel not in tags:
                 continue
 
-            score = 0
+            score = 5  # base
 
-            # base
-            score += 5
-
-            # 🔥 FIX: mejor scoring
+            # 🔥 necesidades
             for need in needs:
                 if need in tags:
-                    score += 4
-                else:
-                    score -= 1
+                    score += 3
 
-            # bonus
             if "best-seller" in tags:
                 score += 2
 
@@ -206,25 +247,24 @@ def get_shopify_recommendations(analysis):
             elif p.get('images'):
                 image_url = p['images'][0]['src']
 
-            scored_products.append({
+            scored.append({
                 "title": p['title'],
                 "variant_id": str(v['id']),
                 "price": v['price'],
                 "image": image_url,
                 "handle": p['handle'],
-                "stock": v.get('inventory_quantity', 0),
+                "category": category,
                 "score": score
             })
 
-        scored_products.sort(key=lambda x: x["score"], reverse=True)
+        # 🔥 elegir el mejor producto de esa categoría
+        if scored:
+            scored.sort(key=lambda x: x["score"], reverse=True)
+            final_products.append(scored[0])
 
-        print(f"Productos rankeados: {len(scored_products)}")
+    print(f"Productos finales: {len(final_products)}")
 
-        return scored_products[:6]
-
-    except Exception as e:
-        print(f"Error Shopify: {e}")
-        return []
+    return final_products
 
 
 # --- RUTA: DIAGNOSTICO SHOPIFY ---
