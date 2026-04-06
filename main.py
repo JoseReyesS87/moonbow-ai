@@ -100,33 +100,61 @@ def subscribe_to_mailchimp(email: str, skin_type: str, skin_tag: str, products: 
 
 
 # --- SHOPIFY ---
-def get_shopify_recommendations(skin_tag):
+def get_shopify_recommendations(analysis):
     headers = {
         "X-Shopify-Access-Token": SHOPIFY_TOKEN,
         "Content-Type": "application/json"
     }
 
-    search_tag = skin_tag.lower().strip()
-    print(f"Buscando productos con tag: '{search_tag}'")
+    tipo_piel = analysis.get("tipo_piel_tag", "").lower().strip()
+    needs = extract_skin_needs(analysis)
+
+    print(f"Tipo piel: {tipo_piel}")
+    print(f"Needs detectados: {needs}")
 
     try:
+        # 🔥 seguimos usando filtro base por tipo de piel
         response = requests.get(
-            f"{BASE_URL}/products.json?tag={search_tag}&limit=50",
+            f"{BASE_URL}/products.json?tag={tipo_piel}&limit=50",
             headers=headers,
             timeout=10
         )
+
         if response.status_code != 200:
             print(f"Error Shopify: {response.status_code}")
             return []
 
-        valid = []
-        for p in response.json().get('products', []):
+        products = response.json().get('products', [])
+        scored_products = []
+
+        for p in products:
             variants = p.get('variants', [])
             if not variants:
                 continue
+
             v = variants[0]
             if v.get('inventory_quantity', 0) <= 0:
                 continue
+
+            tags = [t.lower() for t in p.get("tags", "").split(",")]
+
+            # ❌ seguridad: evitar productos de otro tipo de piel
+            if tipo_piel not in tags:
+                continue
+
+            score = 0
+
+            # 🧴 base (tipo piel)
+            score += 5
+
+            # 💧 necesidades
+            for need in needs:
+                if need in tags:
+                    score += 3
+
+            # ⭐ bonus
+            if "best-seller" in tags:
+                score += 2
 
             image_url = None
             if p.get('image'):
@@ -134,17 +162,23 @@ def get_shopify_recommendations(skin_tag):
             elif p.get('images'):
                 image_url = p['images'][0]['src']
 
-            valid.append({
-                "title":      p['title'],
+            scored_products.append({
+                "title": p['title'],
                 "variant_id": str(v['id']),
-                "price":      v['price'],
-                "image":      image_url,
-                "handle":     p['handle'],
-                "stock":      v.get('inventory_quantity', 0)
+                "price": v['price'],
+                "image": image_url,
+                "handle": p['handle'],
+                "stock": v.get('inventory_quantity', 0),
+                "score": score
             })
 
-        print(f"Productos validos: {len(valid)}")
-        return valid
+        # 🔥 ordenar por score
+        scored_products.sort(key=lambda x: x["score"], reverse=True)
+
+        print(f"Productos rankeados: {len(scored_products)}")
+
+        # devolver top 6
+        return scored_products[:6]
 
     except Exception as e:
         print(f"Error Shopify: {e}")
