@@ -189,27 +189,45 @@ def get_products_by_collection(handle):
     }
 
     try:
-        # obtener collection id
+        collection_id = None
+
+        # 1. Buscar en custom_collections
         res = requests.get(
             f"{BASE_URL}/custom_collections.json?handle={handle}",
             headers=headers,
             timeout=10
         )
+        custom = res.json().get("custom_collections", [])
+        if custom:
+            collection_id = custom[0]["id"]
+            print(f"  [colección] '{handle}' encontrada como custom_collection (id={collection_id})")
 
-        collections = res.json().get("custom_collections", [])
-        if not collections:
+        # 2. Si no se encontró, buscar en smart_collections
+        if not collection_id:
+            res = requests.get(
+                f"{BASE_URL}/smart_collections.json?handle={handle}",
+                headers=headers,
+                timeout=10
+            )
+            smart = res.json().get("smart_collections", [])
+            if smart:
+                collection_id = smart[0]["id"]
+                print(f"  [colección] '{handle}' encontrada como smart_collection (id={collection_id})")
+
+        if not collection_id:
+            print(f"  [colección] '{handle}' NO encontrada en custom ni smart collections")
             return []
 
-        collection_id = collections[0]["id"]
-
-        # obtener productos
+        # 3. Obtener productos de la colección
         res = requests.get(
             f"{BASE_URL}/products.json?collection_id={collection_id}&limit=50",
             headers=headers,
             timeout=10
         )
 
-        return res.json().get("products", [])
+        products = res.json().get("products", [])
+        print(f"  [colección] '{handle}' → {len(products)} productos")
+        return products
 
     except Exception as e:
         print(f"Error colección {handle}: {e}")
@@ -313,6 +331,8 @@ def get_shopify_recommendations(analysis):
 
     print(f"Tipo piel: {tipo_piel}")
     print(f"Needs detectados: {needs}")
+    if not needs:
+        print("  ⚠️  Sin needs — se recomendará por tipo de piel solamente")
 
     # Decide si incluir oil cleanser (doble limpieza)
     include_oil = tipo_piel in ["grasa", "mixta"] or any(
