@@ -28,8 +28,9 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 origins = [
     "http://localhost:5173",  # desarrollo
-    "https://moonbow-ai.vercel.app",  # tu app
-    "https://moonbow.cl"  # Shopify
+    "https://moonbow-skin-ai.vercel.app",  # frontend real
+    "https://moonbow.cl",  # Shopify
+    "https://www.moonbow.cl"  # importante también
 ]
 
 app.add_middleware(
