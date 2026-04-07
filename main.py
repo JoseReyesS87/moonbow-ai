@@ -6,7 +6,8 @@ import uvicorn
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 app = FastAPI()
 
@@ -18,11 +19,11 @@ API_VER            = os.getenv("SHOPIFY_API_VERSION", "2024-10")
 BASE_URL           = f"https://{SHOP_NAME}.myshopify.com/admin/api/{API_VER}"
 
 MAILCHIMP_API_KEY  = os.getenv("MAILCHIMP_API_KEY")
-MAILCHIMP_DC       = os.getenv("MAILCHIMP_DC", "us7")           # <- igual que .env
-MAILCHIMP_LIST_ID  = os.getenv("MAILCHIMP_AUDIENCE_ID")         # <- igual que .env
+MAILCHIMP_DC       = os.getenv("MAILCHIMP_DC", "us7")
+MAILCHIMP_LIST_ID  = os.getenv("MAILCHIMP_AUDIENCE_ID")
 MAILCHIMP_BASE_URL = f"https://{MAILCHIMP_DC}.api.mailchimp.com/3.0"
 
-genai.configure(api_key=GEMINI_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # --- CORS ---
 app.add_middleware(
@@ -45,7 +46,6 @@ class EmailSubscription(BaseModel):
     skin_type: str
     skin_tag: str
     products: list
-    # Campos opcionales del analisis completo
     analisis: str = ''
     hidratacion: str = ''
     sensibilidad: str = ''
@@ -82,22 +82,20 @@ def subscribe_to_mailchimp(
     puntos_str    = " | ".join(puntos_clave[:3])
     member_url    = f"{MAILCHIMP_BASE_URL}/lists/{MAILCHIMP_LIST_ID}/members/{email_hash}"
 
-    # Merge fields completos para personalizacion de emails
     merge_fields = {
-        "SKIN_TYPE":   skin_type,           # ej: 'Piel Grasa'
-        "SKIN_TAG":    skin_tag,             # ej: 'grasa'
-        "PRODUCTS":    product_names,        # primeros 4 productos
-        "ANALISIS":    analisis[:500] if analisis else '',   # diagnostico resumido
-        "HIDRATACION": hidratacion,          # Baja / Media / Optima
-        "SENSIBILIDAD":sensibilidad,         # Baja / Media / Alta
+        "SKIN_TYPE":   skin_type,
+        "SKIN_TAG":    skin_tag,
+        "PRODUCTS":    product_names,
+        "ANALISIS":    analisis[:500] if analisis else '',
+        "HIDRATACION": hidratacion,
+        "SENSIBILIDAD":sensibilidad,
         "ELASTICIDAD": str(elasticidad) if elasticidad else '',
         "EDAD_PIEL":   str(edad_piel) if edad_piel else '',
-        "PUNTOS":      puntos_str,           # puntos clave del analisis
+        "PUNTOS":      puntos_str,
         "RUTINA":      rutina_sugerida[:400] if rutina_sugerida else '',
         "SCORE":       str(score) if score else '',
     }
 
-    # Tags para segmentacion y automatizaciones
     tags_to_apply = [
         {"name": f"piel-{skin_tag}",   "status": "active"},
         {"name": "analizador-ia",       "status": "active"},
@@ -115,7 +113,6 @@ def subscribe_to_mailchimp(
     check = requests.get(member_url, headers=headers)
 
     if check.status_code == 200:
-        # Contacto existente: actualizar datos y agregar nuevo tag de analisis
         current_status = check.json().get("status", "subscribed")
         requests.patch(member_url, headers=headers, json={
             "status":       current_status,
@@ -126,7 +123,6 @@ def subscribe_to_mailchimp(
         return {"status": "updated", "message": "Contacto existente actualizado"}
 
     else:
-        # Nuevo contacto
         res = requests.post(
             f"{MAILCHIMP_BASE_URL}/lists/{MAILCHIMP_LIST_ID}/members",
             headers=headers,
@@ -155,18 +151,15 @@ COLLECTIONS = {
     "sunscreen": ["protector-solar"]
 }
 
-# FUNCION PARA EXTRAER EL JSON DE LA RESPUESTA DE GEMINI
 import re
 
 def extract_json(text):
     try:
-        # intenta parse directo
         return json.loads(text)
     except:
         pass
 
     try:
-        # intenta extraer bloque JSON
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
             return json.loads(match.group())
@@ -176,15 +169,12 @@ def extract_json(text):
     print("⚠️ No se pudo parsear JSON")
     return {}
 
-# FUNCION PARA EXTRAER LAS NECESIDADES DE LA PIEL
 def extract_skin_needs(analysis):
     needs = []
 
     hidratacion = analysis.get("hidratacion", "").lower()
-    if hidratacion == "baja":
+    if hidratacion in ["baja", "media"]:
         needs.append("hidratacion")
-    elif hidratacion == "media":
-        needs.append("hidratacion")  # igual incluir, es un need relevante
 
     sensibilidad = analysis.get("sensibilidad", "").lower()
     if sensibilidad == "alta":
@@ -238,7 +228,6 @@ def get_products_by_collection(handle):
         collection_id = None
         collection_type = None
 
-        # 1. Buscar en custom_collections (manuales)
         res = requests.get(
             f"{BASE_URL}/custom_collections.json?handle={handle}",
             headers=headers,
@@ -250,7 +239,6 @@ def get_products_by_collection(handle):
                 collection_id = custom[0]["id"]
                 collection_type = "custom"
 
-        # 2. Si no se encontró, buscar en smart_collections (automáticas)
         if not collection_id:
             res = requests.get(
                 f"{BASE_URL}/smart_collections.json?handle={handle}",
@@ -269,7 +257,6 @@ def get_products_by_collection(handle):
 
         print(f"  ✅ Colección '{handle}' [{collection_type}] id={collection_id}")
 
-        # 3. Obtener productos de la colección
         res = requests.get(
             f"{BASE_URL}/products.json?collection_id={collection_id}&limit=50",
             headers=headers,
@@ -282,9 +269,8 @@ def get_products_by_collection(handle):
     except Exception as e:
         print(f"  ❌ Error colección '{handle}': {e}")
         return []
-# --- SHOPIFY ---
 
-# Orden canónico de la rutina (determina el orden de presentación al usuario)
+# --- SHOPIFY ---
 ROUTINE_ORDER = [
     "oil-cleanser",
     "foam-cleanser",
@@ -295,7 +281,6 @@ ROUTINE_ORDER = [
     "sunscreen",
 ]
 
-# Tags de tipo de piel compatibles por tipo principal (fallback)
 SKIN_TYPE_COMPATIBILITY = {
     "grasa":    ["grasa", "mixta", "normal"],
     "mixta":    ["mixta", "grasa", "normal"],
@@ -305,35 +290,26 @@ SKIN_TYPE_COMPATIBILITY = {
 }
 
 def score_product(p, tipo_piel, needs, category):
-    """
-    Devuelve un score numérico para un producto dado el tipo de piel y las necesidades.
-    Mayor score = mejor recomendación.
-    """
     tags = [t.lower().strip() for t in p.get("tags", "").split(",")]
     score = 0
 
-    # 1. Coincidencia de tipo de piel (ponderación máxima)
     compatible = SKIN_TYPE_COMPATIBILITY.get(tipo_piel, [tipo_piel])
     if tipo_piel and tipo_piel in tags:
-        score += 20              # match exacto
+        score += 20
     elif any(t in tags for t in compatible):
-        score += 10              # match compatible
+        score += 10
     elif "todo-tipo" in tags or "all-skin" in tags or "all skin" in tags:
-        score += 8               # apto para todo tipo
-    # Si no hay ningún match de tipo de piel, igual sigue (no se descarta)
+        score += 8
 
-    # 2. Necesidades de la piel
     for need in needs:
         if need in tags:
             score += 5
 
-    # 3. Best seller / destacado
     if "best-seller" in tags or "bestseller" in tags:
         score += 8
     if "destacado" in tags or "featured" in tags:
         score += 4
 
-    # 4. Stock suficiente (favorece productos con más stock)
     variants = p.get("variants", [])
     if variants:
         v = variants[0]
@@ -343,7 +319,6 @@ def score_product(p, tipo_piel, needs, category):
         elif qty > 5:
             score += 1
 
-    # 5. Tiene imagen (mejor UX)
     if p.get("image") or p.get("images"):
         score += 2
 
@@ -351,7 +326,6 @@ def score_product(p, tipo_piel, needs, category):
 
 
 def build_product_entry(p, category):
-    """Construye el dict de producto para la respuesta."""
     variants = p.get("variants", [])
     if not variants:
         return None
@@ -382,7 +356,6 @@ def get_shopify_recommendations(analysis):
     print(f"Tipo piel: {tipo_piel}")
     print(f"Needs detectados: {needs}")
 
-    # Decide si incluir oil cleanser (doble limpieza)
     include_oil = tipo_piel in ["grasa", "mixta"] or any(
         n in ["poros", "sebo", "acne"] for n in needs
     )
@@ -398,7 +371,6 @@ def get_shopify_recommendations(analysis):
         if not handles:
             continue
 
-        # Recolectar todos los productos de la categoría
         all_products = []
         for handle in handles:
             all_products.extend(get_products_by_collection(handle))
@@ -407,7 +379,6 @@ def get_shopify_recommendations(analysis):
             print(f"⚠️  Sin productos en categoría: {category}")
             continue
 
-        # Eliminar duplicados por id
         seen_ids = set()
         unique_products = []
         for p in all_products:
@@ -416,16 +387,15 @@ def get_shopify_recommendations(analysis):
                 seen_ids.add(pid)
                 unique_products.append(p)
 
-        # Filtrar productos disponibles (con stock o sin tracking de inventario)
         def is_available(p):
             variants = p.get("variants", [])
             if not variants:
                 return False
             v = variants[0]
             if v.get("inventory_management") in (None, ""):
-                return True  # sin tracking = disponible
+                return True
             if v.get("inventory_policy") == "continue":
-                return True  # vender aunque sin stock
+                return True
             return v.get("inventory_quantity", 0) > 0
 
         with_stock = [p for p in unique_products if is_available(p)]
@@ -440,7 +410,6 @@ def get_shopify_recommendations(analysis):
             print(f"⚠️  Sin stock en categoría: {category}")
             continue
 
-        # Puntuar todos los productos con stock
         scored = []
         for p in with_stock:
             s = score_product(p, tipo_piel, needs, category)
@@ -452,14 +421,11 @@ def get_shopify_recommendations(analysis):
         if not scored:
             continue
 
-        # Ordenar por score descendente
         scored.sort(key=lambda x: x["_score"], reverse=True)
 
-        # Loggear top 3 ANTES de hacer pop (_score se elimina del objeto compartido)
         top_scores = [(p["title"][:40], p["_score"]) for p in scored[:3]]
         print(f"  [{category}] top: {top_scores}")
 
-        # Elegir el mejor y limpiar campo interno
         best = scored[0]
         best.pop("_score", None)
         final_products.append(best)
@@ -472,31 +438,34 @@ def get_shopify_recommendations(analysis):
 @app.get("/debug/gemini")
 async def debug_gemini():
     try:
-        available = [
-            m.name for m in genai.list_models()
-            if 'generateContent' in m.supported_generation_methods
-        ]
+        available = []
+        for m in client.models.list():
+            if hasattr(m, 'supported_actions') and 'generateContent' in (m.supported_actions or []):
+                available.append(m.name)
+            elif hasattr(m, 'name') and 'flash' in m.name.lower():
+                available.append(m.name)
+
         results = {}
         test_models = [
-            'models/gemini-2.5-flash',
-            'models/gemini-2.0-flash',
-            'models/gemini-1.5-flash',
-            'models/gemini-1.5-flash-8b',
+            'gemini-2.5-flash-preview-04-17',
+            'gemini-2.0-flash',
+            'gemini-1.5-flash',
+            'gemini-1.5-flash-8b',
         ]
         for model_name in test_models:
-            if model_name not in available:
-                results[model_name] = "no disponible"
-                continue
             try:
-                m = genai.GenerativeModel(model_name)
-                r = m.generate_content("Responde solo: ok")
-                results[model_name] = "ok" if r and r.text else "sin respuesta"
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents="Responde solo: ok"
+                )
+                results[model_name] = "ok" if response and response.text else "sin respuesta"
             except Exception as e:
                 err = str(e)
                 if "429" in err or "quota" in err.lower():
                     results[model_name] = "quota excedida"
                 else:
                     results[model_name] = f"error: {err[:80]}"
+
         return {"available_models": available, "quota_check": results}
     except Exception as e:
         return {"error": str(e)}
@@ -543,22 +512,11 @@ async def analyze_skin(file: UploadFile = File(...)):
     try:
         image_bytes = await file.read()
 
-        # Modelos en orden de preferencia (fallback automático si hay quota excedida)
         MODEL_PRIORITY = [
-            'models/gemini-2.0-flash',
-            'models/gemini-1.5-flash',
-            'models/gemini-1.5-flash-8b',
+            'gemini-2.0-flash',
+            'gemini-1.5-flash',
+            'gemini-1.5-flash-8b',
         ]
-
-        available_models = [
-            m.name for m in genai.list_models()
-            if 'generateContent' in m.supported_generation_methods
-        ]
-        target_model = next(
-            (m for m in MODEL_PRIORITY if m in available_models),
-            available_models[0] if available_models else 'models/gemini-1.5-flash'
-        )
-        print(f"Modelo seleccionado: {target_model}")
 
         prompt = """
         Eres un experto en dermatologia y K-Beauty de Moonbow.cl.
@@ -585,19 +543,19 @@ async def analyze_skin(file: UploadFile = File(...)):
         }
         """
 
-        # Intentar con cada modelo hasta que uno funcione
         response = None
         last_error = None
-        models_to_try = [target_model] + [m for m in MODEL_PRIORITY if m != target_model and m in available_models]
 
-        for model_name in models_to_try:
+        for model_name in MODEL_PRIORITY:
             try:
                 print(f"Intentando con modelo: {model_name}")
-                m = genai.GenerativeModel(model_name)
-                response = m.generate_content([
-                    prompt,
-                    {"mime_type": "image/jpeg", "data": image_bytes}
-                ])
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=[
+                        prompt,
+                        types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+                    ]
+                )
                 if response and response.text:
                     print(f"✅ Respuesta ok con {model_name}")
                     break
@@ -607,7 +565,7 @@ async def analyze_skin(file: UploadFile = File(...)):
                 if "429" in err_str or "quota" in err_str.lower() or "exceeded" in err_str.lower():
                     print(f"⚠️ Quota excedida en {model_name}, probando siguiente...")
                     continue
-                raise  # error distinto, no reintentar
+                raise
 
         if not response or not response.text:
             raise Exception(f"Todos los modelos fallaron. Último error: {last_error}")
@@ -623,7 +581,6 @@ async def analyze_skin(file: UploadFile = File(...)):
         if not isinstance(analysis_data, dict):
             return {"error": "analysis_failed"}
 
-        # 🔧 normalizar tipos
         analysis_data["elasticidad"] = int(analysis_data.get("elasticidad", 70))
         analysis_data["edad_piel"] = int(analysis_data.get("edad_piel", 30))
 
@@ -635,7 +592,6 @@ async def analyze_skin(file: UploadFile = File(...)):
             f"Edad:{analysis_data.get('edad_piel')}"
         )
 
-        # 🔥 FIX IMPORTANTE
         recommendations = get_shopify_recommendations(analysis_data)
 
         return {
