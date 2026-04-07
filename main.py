@@ -23,7 +23,10 @@ MAILCHIMP_DC       = os.getenv("MAILCHIMP_DC", "us7")
 MAILCHIMP_LIST_ID  = os.getenv("MAILCHIMP_AUDIENCE_ID")
 MAILCHIMP_BASE_URL = f"https://{MAILCHIMP_DC}.api.mailchimp.com/3.0"
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+client = genai.Client(
+    api_key=GEMINI_API_KEY,
+    http_options={'api_version': 'v1'} # Forzamos v1 para estabilidad
+)
 
 # --- CORS ---
 app.add_middleware(
@@ -515,7 +518,7 @@ async def analyze_skin(file: UploadFile = File(...)):
         MODEL_PRIORITY = [
             'gemini-1.5-flash',    # El más estable y con mayor cuota para tu plan actual
             'gemini-1.5-flash-8b', 
-            'gemini-2.0-flash-exp' # Usar la versión experimental o la más reciente disponible
+            'gemini-2.0-flash-001' # Usar la versión experimental o la más reciente disponible
         ]
 
         prompt = """
