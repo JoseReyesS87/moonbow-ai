@@ -515,9 +515,8 @@ async def analyze_skin(file: UploadFile = File(...)):
         image_bytes = await file.read()
 
         MODEL_PRIORITY = [
-            'publishers/google/models/gemini-1.5-flash',
-            'publishers/google/models/gemini-1.5-flash-8b',
-            'gemini-1.5-flash', # Mantenemos el normal por si acaso
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
         ]
 
         prompt = """
@@ -564,10 +563,11 @@ async def analyze_skin(file: UploadFile = File(...)):
             except Exception as model_err:
                 last_error = model_err
                 err_str = str(model_err)
-                if "429" in err_str or "quota" in err_str.lower() or "exceeded" in err_str.lower():
-                    print(f"⚠️ Quota excedida en {model_name}, probando siguiente...")
+                if any(x in err_str.lower() for x in ["429", "quota", "exceeded", "404", "not found"]):
+                    print(f"⚠️ Error en {model_name}, probando siguiente...")
                     continue
-                raise
+                else:
+                    raise
 
         if not response or not response.text:
             raise Exception(f"Todos los modelos fallaron. Último error: {last_error}")
