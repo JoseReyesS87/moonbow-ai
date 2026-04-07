@@ -25,7 +25,6 @@ MAILCHIMP_BASE_URL = f"https://{MAILCHIMP_DC}.api.mailchimp.com/3.0"
 
 client = genai.Client(
     api_key=GEMINI_API_KEY,
-    http_options={'api_version': 'v1'} # Forzamos v1 para estabilidad
 )
 
 # --- CORS ---
@@ -516,9 +515,9 @@ async def analyze_skin(file: UploadFile = File(...)):
         image_bytes = await file.read()
 
         MODEL_PRIORITY = [
-            'models/gemini-1.5-flash',
-            'models/gemini-1.5-flash-8b',
-            'models/gemini-2.0-flash-001'
+            'publishers/google/models/gemini-1.5-flash',
+            'publishers/google/models/gemini-1.5-flash-8b',
+            'gemini-1.5-flash', # Mantenemos el normal por si acaso
         ]
 
         prompt = """
