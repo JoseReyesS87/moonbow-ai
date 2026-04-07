@@ -516,9 +516,9 @@ async def analyze_skin(file: UploadFile = File(...)):
         image_bytes = await file.read()
 
         MODEL_PRIORITY = [
-            'gemini-1.5-flash',    # El más estable y con mayor cuota para tu plan actual
-            'gemini-1.5-flash-8b', 
-            'gemini-2.0-flash-001' # Usar la versión experimental o la más reciente disponible
+            'models/gemini-1.5-flash',
+            'models/gemini-1.5-flash-8b',
+            'models/gemini-2.0-flash-001'
         ]
 
         prompt = """
