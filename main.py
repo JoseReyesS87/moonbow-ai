@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 import json
 import hashlib
@@ -78,7 +79,7 @@ def subscribe_to_mailchimp(
         "Content-Type": "application/json"
     }
 
-    puntos_clave = puntos_clave or []
+    puntos_clave  = puntos_clave or []
     email_hash    = hashlib.md5(email.lower().encode()).hexdigest()
     product_names = " | ".join([p.get("title", "") for p in products[:4]])
     puntos_str    = " | ".join(puntos_clave[:3])
@@ -112,22 +113,26 @@ def subscribe_to_mailchimp(
     if score and score < 60:
         tags_to_apply.append({"name": "score-bajo", "status": "active"})
 
-    # UPSERT: crea o actualiza sin double opt-in
-    # Verificar estado actual
+    # Verificar estado actual del contacto
     check = requests.get(member_url, headers=headers)
     current_status = None
     if check.status_code == 200:
         current_status = check.json().get("status")
 
-    # Definir status a enviar
+    print(f"Mailchimp: estado actual de {email} → {current_status}")
+
+    # Definir nuevo status:
+    # - Si no existe (None), pending o cleaned → suscribir
+    # - Si ya está unsubscribed → respetar, no forzar
+    # - Si ya está subscribed → mantener
     if current_status in (None, "pending", "cleaned"):
         new_status = "subscribed"
     elif current_status == "unsubscribed":
-        # No forzar re-suscripción, Mailchimp lo rechaza
         new_status = "unsubscribed"
     else:
-        new_status = current_status  # mantener "subscribed" si ya lo era
+        new_status = current_status
 
+    # UPSERT con status explícito
     res = requests.put(
         member_url,
         headers=headers,
@@ -139,40 +144,35 @@ def subscribe_to_mailchimp(
         }
     )
 
-    if res.status_code in [200, 204]:
-        # Aplicar tags por separado (el PUT no los soporta directamente)
-        requests.post(f"{member_url}/tags", headers=headers, json={"tags": tags_to_apply})
-        action = "creado" if res.json().get("status") == "subscribed" else "actualizado"
-        print(f"Mailchimp: contacto {action} ({email}) tag=piel-{skin_tag} score={score}")
-        return {"status": "subscribed", "message": f"Contacto {action}"}
-    else:
-        print(f"Mailchimp error {res.status_code}: {res.text}")
-        return {"status": "error", "message": res.text}
-
-    print(f"Mailchimp PUT status: {res.status_code}")
+    print(f"Mailchimp PUT status code: {res.status_code}")
     print(f"Mailchimp PUT response: {res.text[:500]}")
-    print(f"current_status era: {current_status}, new_status enviado: {new_status}")
 
     if res.status_code in [200, 204]:
-        requests.post(f"{member_url}/tags", headers=headers, json={"tags": tags_to_apply})
-        action = "creado" if res.json().get("status") == "subscribed" else "actualizado"
+        # Aplicar tags por separado
+        tag_res = requests.post(
+            f"{member_url}/tags",
+            headers=headers,
+            json={"tags": tags_to_apply}
+        )
+        print(f"Mailchimp tags status: {tag_res.status_code}")
+        action = "creado" if res.json().get("status") == "subscribed" and current_status is None else "actualizado"
         print(f"Mailchimp: contacto {action} ({email}) tag=piel-{skin_tag} score={score}")
         return {"status": "subscribed", "message": f"Contacto {action}"}
     else:
         print(f"Mailchimp error {res.status_code}: {res.text}")
         return {"status": "error", "message": res.text}
+
 
 # --- COLECCIONES SHOPIFY ---
 COLLECTIONS = {
     "oil-cleanser": ["limpiadores-oleosos-desmaquillantes"],
     "foam-cleanser": ["limpiador-en-espuma"],
-    "toner": ["tonicos"],
-    "serum": ["serum"],
-    "moisturizer": ["cremas-y-lociones"],
-    "sunscreen": ["protector-solar"]
+    "toner":        ["tonicos"],
+    "serum":        ["serum"],
+    "moisturizer":  ["cremas-y-lociones"],
+    "sunscreen":    ["protector-solar"]
 }
 
-import re
 
 def extract_json(text):
     try:
@@ -189,6 +189,7 @@ def extract_json(text):
 
     print("⚠️ No se pudo parsear JSON")
     return {}
+
 
 def extract_skin_needs(analysis):
     needs = []
@@ -238,6 +239,7 @@ def extract_skin_needs(analysis):
 
     return list(set(needs))
 
+
 # --- FUNCION PARA OBTENER LOS PRODUCTOS DE LAS COLECCIONES SHOPIFY ---
 def get_products_by_collection(handle):
     headers = {
@@ -246,7 +248,7 @@ def get_products_by_collection(handle):
     }
 
     try:
-        collection_id = None
+        collection_id   = None
         collection_type = None
 
         res = requests.get(
@@ -257,7 +259,7 @@ def get_products_by_collection(handle):
         if res.status_code == 200:
             custom = res.json().get("custom_collections", [])
             if custom:
-                collection_id = custom[0]["id"]
+                collection_id   = custom[0]["id"]
                 collection_type = "custom"
 
         if not collection_id:
@@ -269,7 +271,7 @@ def get_products_by_collection(handle):
             if res.status_code == 200:
                 smart = res.json().get("smart_collections", [])
                 if smart:
-                    collection_id = smart[0]["id"]
+                    collection_id   = smart[0]["id"]
                     collection_type = "smart"
 
         if not collection_id:
@@ -291,6 +293,7 @@ def get_products_by_collection(handle):
         print(f"  ❌ Error colección '{handle}': {e}")
         return []
 
+
 # --- SHOPIFY ---
 ROUTINE_ORDER = [
     "oil-cleanser",
@@ -309,8 +312,9 @@ SKIN_TYPE_COMPATIBILITY = {
     "normal":   ["normal", "mixta", "seca", "grasa"],
 }
 
+
 def score_product(p, tipo_piel, needs, category):
-    tags = [t.lower().strip() for t in p.get("tags", "").split(",")]
+    tags  = [t.lower().strip() for t in p.get("tags", "").split(",")]
     score = 0
 
     compatible = SKIN_TYPE_COMPATIBILITY.get(tipo_piel, [tipo_piel])
@@ -332,7 +336,7 @@ def score_product(p, tipo_piel, needs, category):
 
     variants = p.get("variants", [])
     if variants:
-        v = variants[0]
+        v   = variants[0]
         qty = v.get("inventory_quantity", 0)
         if qty > 20:
             score += 3
@@ -399,7 +403,7 @@ def get_shopify_recommendations(analysis):
             print(f"⚠️  Sin productos en categoría: {category}")
             continue
 
-        seen_ids = set()
+        seen_ids        = set()
         unique_products = []
         for p in all_products:
             pid = p.get("id")
@@ -432,7 +436,7 @@ def get_shopify_recommendations(analysis):
 
         scored = []
         for p in with_stock:
-            s = score_product(p, tipo_piel, needs, category)
+            s     = score_product(p, tipo_piel, needs, category)
             entry = build_product_entry(p, category)
             if entry:
                 entry["_score"] = s
@@ -465,7 +469,7 @@ async def debug_gemini():
             elif hasattr(m, 'name') and 'flash' in m.name.lower():
                 available.append(m.name)
 
-        results = {}
+        results     = {}
         test_models = [
             'gemini-2.5-flash-preview-04-17',
             'gemini-2.0-flash',
@@ -499,11 +503,11 @@ async def debug_shopify(tag: str):
         "Content-Type": "application/json"
     }
     tags_to_check = [tag, "grasa", "seca", "mixta", "sensible"]
-    result = {}
+    result        = {}
     for t in tags_to_check:
-        r = requests.get(f"{BASE_URL}/products.json?tag={t}&limit=10", headers=headers, timeout=10)
-        products = r.json().get("products", []) if r.status_code == 200 else []
-        result[t] = [{"title": p["title"], "tags": p.get("tags", "")} for p in products]
+        r              = requests.get(f"{BASE_URL}/products.json?tag={t}&limit=10", headers=headers, timeout=10)
+        products       = r.json().get("products", []) if r.status_code == 200 else []
+        result[t]      = [{"title": p["title"], "tags": p.get("tags", "")} for p in products]
     return result
 
 
@@ -514,11 +518,11 @@ async def debug_collections():
     for category, handles in COLLECTIONS.items():
         report[category] = {}
         for handle in handles:
-            products = get_products_by_collection(handle)
+            products             = get_products_by_collection(handle)
             report[category][handle] = [
                 {
                     "title": p["title"],
-                    "tags": p.get("tags", ""),
+                    "tags":  p.get("tags", ""),
                     "stock": p["variants"][0].get("inventory_quantity", 0) if p.get("variants") else 0
                 }
                 for p in products[:10]
@@ -562,7 +566,7 @@ async def analyze_skin(file: UploadFile = File(...)):
         }
         """
 
-        response = None
+        response   = None
         last_error = None
 
         for model_name in MODEL_PRIORITY:
@@ -580,7 +584,7 @@ async def analyze_skin(file: UploadFile = File(...)):
                     break
             except Exception as model_err:
                 last_error = model_err
-                err_str = str(model_err)
+                err_str    = str(model_err)
                 if any(x in err_str.lower() for x in ["429", "quota", "exceeded", "404", "not found"]):
                     print(f"⚠️ Error en {model_name}, probando siguiente...")
                     continue
@@ -602,7 +606,7 @@ async def analyze_skin(file: UploadFile = File(...)):
             return {"error": "analysis_failed"}
 
         analysis_data["elasticidad"] = int(analysis_data.get("elasticidad", 70))
-        analysis_data["edad_piel"] = int(analysis_data.get("edad_piel", 30))
+        analysis_data["edad_piel"]   = int(analysis_data.get("edad_piel", 30))
 
         print(
             f"Tipo: {analysis_data.get('tipo_piel')} | "
@@ -615,7 +619,7 @@ async def analyze_skin(file: UploadFile = File(...)):
         recommendations = get_shopify_recommendations(analysis_data)
 
         return {
-            "result": analysis_data,
+            "result":   analysis_data,
             "products": recommendations
         }
 
