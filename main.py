@@ -113,13 +113,29 @@ def subscribe_to_mailchimp(
         tags_to_apply.append({"name": "score-bajo", "status": "active"})
 
     # UPSERT: crea o actualiza sin double opt-in
+    # Verificar estado actual
+    check = requests.get(member_url, headers=headers)
+    current_status = None
+    if check.status_code == 200:
+        current_status = check.json().get("status")
+
+    # Definir status a enviar
+    if current_status in (None, "pending", "cleaned"):
+        new_status = "subscribed"
+    elif current_status == "unsubscribed":
+        # No forzar re-suscripción, Mailchimp lo rechaza
+        new_status = "unsubscribed"
+    else:
+        new_status = current_status  # mantener "subscribed" si ya lo era
+
     res = requests.put(
         member_url,
         headers=headers,
         json={
-            "email_address":  email,
-            "status_if_new":  "subscribed",   # solo aplica si es contacto nuevo
-            "merge_fields":   merge_fields,
+            "email_address": email,
+            "status":        new_status,
+            "status_if_new": "subscribed",
+            "merge_fields":  merge_fields,
         }
     )
 
