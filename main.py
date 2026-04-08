@@ -16,7 +16,11 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 
 if not firebase_admin._apps:
-    cred = credentials.Certificate(os.getenv("FIREBASE_CREDENTIALS_PATH", "serviceAccountKey.json"))
+    creds_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
+    if creds_json:
+        cred = credentials.Certificate(json.loads(creds_json))
+    else:
+        cred = credentials.Certificate("serviceAccountKey.json")  # solo para desarrollo local
     firebase_admin.initialize_app(cred)
 
 db = firestore.client()
