@@ -59,20 +59,7 @@ class EmailSubscription(BaseModel):
 
 
 # --- MAILCHIMP ---
-def subscribe_to_mailchimp(
-    email: str,
-    skin_type: str,
-    skin_tag: str,
-    products: list,
-    analisis: str = '',
-    hidratacion: str = '',
-    sensibilidad: str = '',
-    elasticidad: int = 0,
-    edad_piel: int = 0,
-    puntos_clave: list = None,
-    rutina_sugerida: str = '',
-    score: int = 0
-):
+def subscribe_to_mailchimp(...):
     headers = {
         "Authorization": f"Bearer {MAILCHIMP_API_KEY}",
         "Content-Type": "application/json"
@@ -85,17 +72,17 @@ def subscribe_to_mailchimp(
     member_url    = f"{MAILCHIMP_BASE_URL}/lists/{MAILCHIMP_LIST_ID}/members/{email_hash}"
 
     merge_fields = {
-        "SKIN_TYPE":   skin_type,
-        "SKIN_TAG":    skin_tag,
-        "PRODUCTS":    product_names,
-        "ANALISIS":    analisis[:500] if analisis else '',
-        "HIDRAT": hidratacion,
-        "SENSI":sensibilidad,
-        "ELAST": str(elasticidad) if elasticidad else '',
-        "EDAD_PIEL":   str(edad_piel) if edad_piel else '',
-        "PUNTOS":      puntos_str,
-        "RUTINA":      rutina_sugerida[:400] if rutina_sugerida else '',
-        "SCORE":       str(score) if score else '',
+        "SKIN_TYPE":  skin_type,
+        "SKIN_TAG":   skin_tag,
+        "PRODUCTS":   product_names,
+        "ANALISIS":   analisis[:500] if analisis else '',
+        "HIDRAT":     hidratacion,
+        "SENSI":      sensibilidad,
+        "ELAST":      str(elasticidad) if elasticidad else '',
+        "EDAD_PIEL":  str(edad_piel) if edad_piel else '',
+        "PUNTOS":     puntos_str,
+        "RUTINA":     rutina_sugerida[:400] if rutina_sugerida else '',
+        "SCORE":      str(score) if score else '',
     }
 
     tags_to_apply = [
@@ -112,35 +99,26 @@ def subscribe_to_mailchimp(
     if score and score < 60:
         tags_to_apply.append({"name": "score-bajo", "status": "active"})
 
-    check = requests.get(member_url, headers=headers)
+    # UPSERT: crea o actualiza sin double opt-in
+    res = requests.put(
+        member_url,
+        headers=headers,
+        json={
+            "email_address":  email,
+            "status_if_new":  "subscribed",   # solo aplica si es contacto nuevo
+            "merge_fields":   merge_fields,
+        }
+    )
 
-    if check.status_code == 200:
-        current_status = check.json().get("status", "subscribed")
-        requests.patch(member_url, headers=headers, json={
-            "status":       current_status,
-            "merge_fields": merge_fields
-        })
+    if res.status_code in [200, 204]:
+        # Aplicar tags por separado (el PUT no los soporta directamente)
         requests.post(f"{member_url}/tags", headers=headers, json={"tags": tags_to_apply})
-        print(f"Mailchimp: contacto actualizado ({email}) tag=piel-{skin_tag} score={score}")
-        return {"status": "updated", "message": "Contacto existente actualizado"}
-
+        action = "creado" if res.json().get("status") == "subscribed" else "actualizado"
+        print(f"Mailchimp: contacto {action} ({email}) tag=piel-{skin_tag} score={score}")
+        return {"status": "subscribed", "message": f"Contacto {action}"}
     else:
-        res = requests.post(
-            f"{MAILCHIMP_BASE_URL}/lists/{MAILCHIMP_LIST_ID}/members",
-            headers=headers,
-            json={
-                "email_address": email,
-                "status":        "subscribed",
-                "merge_fields":  merge_fields,
-                "tags":          [t["name"] for t in tags_to_apply]
-            }
-        )
-        if res.status_code in [200, 204]:
-            print(f"Mailchimp: nuevo contacto ({email}) tag=piel-{skin_tag} score={score}")
-            return {"status": "subscribed", "message": "Nuevo contacto agregado"}
-        else:
-            print(f"Mailchimp error {res.status_code}: {res.text}")
-            return {"status": "error", "message": res.text}
+        print(f"Mailchimp error {res.status_code}: {res.text}")
+        return {"status": "error", "message": res.text}
 
 # --- COLECCIONES SHOPIFY ---
 COLLECTIONS = {
