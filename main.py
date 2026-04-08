@@ -59,7 +59,20 @@ class EmailSubscription(BaseModel):
 
 
 # --- MAILCHIMP ---
-def subscribe_to_mailchimp(...):
+def subscribe_to_mailchimp(
+    email: str,
+    skin_type: str,
+    skin_tag: str,
+    products: list,
+    analisis: str = '',
+    hidratacion: str = '',
+    sensibilidad: str = '',
+    elasticidad: int = 0,
+    edad_piel: int = 0,
+    puntos_clave: list = None,
+    rutina_sugerida: str = '',
+    score: int = 0
+):
     headers = {
         "Authorization": f"Bearer {MAILCHIMP_API_KEY}",
         "Content-Type": "application/json"
