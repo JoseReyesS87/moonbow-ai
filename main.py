@@ -148,7 +148,6 @@ COLLECTIONS = {
     "foam-cleanser": ["limpiador-en-espuma"],
     "toner": ["tonicos"],
     "serum": ["serum"],
-    "eye-cream": ["contorno-de-ojos"],
     "moisturizer": ["cremas-y-lociones"],
     "sunscreen": ["protector-solar"]
 }
@@ -278,7 +277,6 @@ ROUTINE_ORDER = [
     "foam-cleanser",
     "toner",
     "serum",
-    "eye-cream",
     "moisturizer",
     "sunscreen",
 ]
