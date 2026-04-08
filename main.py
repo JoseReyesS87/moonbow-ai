@@ -125,7 +125,7 @@ def subscribe_to_mailchimp(
     # - Si no existe (None), pending o cleaned → suscribir
     # - Si ya está unsubscribed → respetar, no forzar
     # - Si ya está subscribed → mantener
-    if current_status in (None, "pending", "cleaned"):
+    if current_status in (None, "pending", "cleaned", "transactional"):
         new_status = "subscribed"
     elif current_status == "unsubscribed":
         new_status = "unsubscribed"
