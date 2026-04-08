@@ -149,6 +149,19 @@ def subscribe_to_mailchimp(
         print(f"Mailchimp error {res.status_code}: {res.text}")
         return {"status": "error", "message": res.text}
 
+    print(f"Mailchimp PUT status: {res.status_code}")
+    print(f"Mailchimp PUT response: {res.text[:500]}")
+    print(f"current_status era: {current_status}, new_status enviado: {new_status}")
+
+    if res.status_code in [200, 204]:
+        requests.post(f"{member_url}/tags", headers=headers, json={"tags": tags_to_apply})
+        action = "creado" if res.json().get("status") == "subscribed" else "actualizado"
+        print(f"Mailchimp: contacto {action} ({email}) tag=piel-{skin_tag} score={score}")
+        return {"status": "subscribed", "message": f"Contacto {action}"}
+    else:
+        print(f"Mailchimp error {res.status_code}: {res.text}")
+        return {"status": "error", "message": res.text}
+
 # --- COLECCIONES SHOPIFY ---
 COLLECTIONS = {
     "oil-cleanser": ["limpiadores-oleosos-desmaquillantes"],
