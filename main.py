@@ -1,5 +1,6 @@
 import os
 import re
+import uuid
 import requests
 import json
 import hashlib
@@ -9,6 +10,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from google import genai
 from google.genai import types
+
+# --- FIREBASE ---
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+if not firebase_admin._apps:
+    cred = credentials.Certificate(os.getenv("FIREBASE_CREDENTIALS_PATH", "serviceAccountKey.json"))
+    firebase_admin.initialize_app(cred)
+
+db = firestore.client()
 
 app = FastAPI()
 
@@ -43,6 +54,172 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# ─────────────────────────────────────────────
+# FIRESTORE HELPERS
+# ─────────────────────────────────────────────
+
+def _new_id() -> str:
+    return str(uuid.uuid4())
+
+
+def _asegurar_usuario(user_id: str, email: str = "") -> None:
+    """Crea el documento de usuario en Firestore si no existe todavía."""
+    user_ref = db.collection("usuarios").document(user_id)
+    if not user_ref.get().exists:
+        user_ref.set({
+            "perfil": {
+                "nombre": "",
+                "email": email,
+                "skin_type_latest": None,
+                "skin_concerns_latest": [],
+            },
+            "lealtad": {
+                "puntos": 0,
+                "puntos_acumulados_total": 0,
+                "tier": "bronze",
+            },
+            "modelo_ml": {
+                "ltv_estimado": 0,
+                "probabilidad_compra": 0.5,
+                "sensibilidad_precio": 0.5,
+                "segmento_dinamico": None,
+                "ultima_interaccion": firestore.SERVER_TIMESTAMP,
+            },
+            "metadata": {
+                "created_at": firestore.SERVER_TIMESTAMP,
+                "last_analysis_id": None,
+                "last_purchase_date": None,
+                "total_purchases": 0,
+            }
+        })
+        print(f"✅ Usuario creado en Firestore: {user_id}")
+
+
+def _guardar_analisis(user_id: str, analysis_data: dict, products: list) -> str:
+    """
+    Guarda el análisis completo en la subcolección usuarios/{user_id}/analisis.
+    Devuelve el analysis_id generado.
+    """
+    analysis_id = _new_id()
+
+    # Normalizar concerns desde los puntos_clave del análisis
+    concerns = []
+    puntos = " ".join(analysis_data.get("puntos_clave", [])).lower()
+    if "acn" in puntos or "grano" in puntos:
+        concerns.append("acne")
+    if "poro" in puntos:
+        concerns.append("poros_dilatados")
+    if "mancha" in puntos:
+        concerns.append("manchas")
+    if "hidrat" in puntos or "seca" in puntos:
+        concerns.append("deshidratacion")
+    if "rojez" in puntos or "irritad" in puntos:
+        concerns.append("sensibilidad")
+
+    resultados = {
+        "skin_type":   analysis_data.get("tipo_piel_tag"),
+        "skin_label":  analysis_data.get("tipo_piel"),
+        "concerns":    concerns,
+        "scores": {
+            "hidratacion":  analysis_data.get("hidratacion", ""),
+            "elasticidad":  analysis_data.get("elasticidad", 0),
+            "sensibilidad": analysis_data.get("sensibilidad", ""),
+            "edad_piel":    analysis_data.get("edad_piel", 0),
+        },
+        "analisis_texto":  analysis_data.get("analisis", ""),
+        "puntos_clave":    analysis_data.get("puntos_clave", []),
+        "rutina_sugerida": analysis_data.get("rutina_sugerida", ""),
+    }
+
+    # Guardar en subcolección
+    analisis_ref = (
+        db.collection("usuarios")
+          .document(user_id)
+          .collection("analisis")
+          .document(analysis_id)
+    )
+    analisis_ref.set({
+        "analysis_id":       analysis_id,
+        "resultados":        resultados,
+        "productos_sugeridos": [
+            {
+                "title":      p.get("title"),
+                "category":   p.get("category"),
+                "variant_id": p.get("variant_id"),
+                "price":      p.get("price"),
+            }
+            for p in products
+        ],
+        "algoritmo_version": "v1",
+        "timestamp":         firestore.SERVER_TIMESTAMP,
+    })
+
+    # Actualizar perfil raíz del usuario
+    db.collection("usuarios").document(user_id).update({
+        "perfil.skin_type_latest":    resultados["skin_type"],
+        "perfil.skin_concerns_latest": concerns,
+        "metadata.last_analysis_id":  analysis_id,
+        "modelo_ml.ultima_interaccion": firestore.SERVER_TIMESTAMP,
+    })
+
+    # Registrar evento para el learning loop
+    db.collection("eventos_usuario").document(_new_id()).set({
+        "event_id":   _new_id(),
+        "user_id":    user_id,
+        "event_name": "analysis_completed",
+        "properties": {
+            "skin_type":        resultados["skin_type"],
+            "concerns":         concerns,
+            "analysis_id":      analysis_id,
+            "productos_count":  len(products),
+        },
+        "context": {"platform": "web", "algoritmo_version": "v1"},
+        "timestamp": firestore.SERVER_TIMESTAMP,
+    })
+
+    print(f"✅ Análisis guardado en Firestore: {analysis_id} → usuario {user_id}")
+    return analysis_id
+
+
+def _acumular_puntos_simple(user_id: str, puntos: int, motivo: str, metadata: dict = None) -> None:
+    """Versión simplificada (sin transacción) para acumular puntos."""
+    user_ref = db.collection("usuarios").document(user_id)
+    snapshot = user_ref.get()
+    if not snapshot.exists:
+        return
+
+    saldo_actual   = snapshot.get("lealtad.puntos") or 0
+    acumulado_total = snapshot.get("lealtad.puntos_acumulados_total") or 0
+    nuevo_saldo    = saldo_actual + puntos
+    nuevo_total    = acumulado_total + max(puntos, 0)
+
+    update_data = {
+        "lealtad.puntos":                nuevo_saldo,
+        "lealtad.puntos_acumulados_total": nuevo_total,
+        "modelo_ml.ultima_interaccion":  firestore.SERVER_TIMESTAMP,
+    }
+
+    if nuevo_total >= 5000:
+        update_data["lealtad.tier"] = "platinum"
+    elif nuevo_total >= 2000:
+        update_data["lealtad.tier"] = "gold"
+    elif nuevo_total >= 500:
+        update_data["lealtad.tier"] = "silver"
+
+    user_ref.update(update_data)
+
+    tx_ref = user_ref.collection("transacciones_lealtad").document(_new_id())
+    tx_ref.set({
+        "tipo":             "earn" if puntos >= 0 else "redeem",
+        "puntos":           puntos,
+        "saldo_resultante": nuevo_saldo,
+        "motivo":           motivo,
+        "metadata":         metadata or {},
+        "timestamp":        firestore.SERVER_TIMESTAMP,
+    })
+    print(f"✅ Puntos acumulados: +{puntos} → usuario {user_id} (nuevo saldo: {nuevo_saldo})")
+
 # --- MODELOS ---
 class EmailSubscription(BaseModel):
     email: str
@@ -57,6 +234,7 @@ class EmailSubscription(BaseModel):
     puntos_clave: list = []
     rutina_sugerida: str = ''
     score: int = 0
+    analysis_id: str = ''   # ID del análisis pendiente generado en /analyze
 
 
 # --- MAILCHIMP ---
@@ -618,9 +796,21 @@ async def analyze_skin(file: UploadFile = File(...)):
 
         recommendations = get_shopify_recommendations(analysis_data)
 
+        # ── FIRESTORE: contar análisis totales para métrica de funnel ──
+        analysis_id = _new_id()
+        try:
+            db.collection("metricas").document("funnel").set({
+                "total_analisis": firestore.Increment(1),
+                "updated_at":     firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+            print(f"✅ Funnel: total_analisis +1")
+        except Exception as fe:
+            print(f"⚠️  Firestore error en /analyze (no crítico): {fe}")
+
         return {
-            "result":   analysis_data,
-            "products": recommendations
+            "result":      analysis_data,
+            "products":    recommendations,
+            "analysis_id": analysis_id,   # el frontend lo envía en /subscribe
         }
 
     except Exception as e:
@@ -646,7 +836,56 @@ async def subscribe(data: EmailSubscription):
             rutina_sugerida=data.rutina_sugerida,
             score=data.score
         )
+
+        # ── FIRESTORE: guardar análisis y actualizar métricas de funnel ──
+        try:
+            user_id = hashlib.md5(data.email.lower().encode()).hexdigest()
+
+            # 1. Crear usuario si no existe
+            _asegurar_usuario(user_id, email=data.email)
+
+            # 2. Construir analysis_data desde los campos del subscribe
+            analysis_data = {
+                "tipo_piel_tag":   data.skin_tag,
+                "tipo_piel":       data.skin_type,
+                "analisis":        data.analisis,
+                "hidratacion":     data.hidratacion,
+                "sensibilidad":    data.sensibilidad,
+                "elasticidad":     data.elasticidad,
+                "edad_piel":       data.edad_piel,
+                "puntos_clave":    data.puntos_clave,
+                "rutina_sugerida": data.rutina_sugerida,
+            }
+
+            # 3. Guardar análisis bajo el usuario
+            saved_id = _guardar_analisis(user_id, analysis_data, data.products)
+
+            # 4. Dar puntos (bienvenida solo la primera vez)
+            total_analisis = len(
+                list(db.collection("usuarios").document(user_id)
+                     .collection("analisis").limit(2).stream())
+            )
+            if total_analisis <= 1:
+                _acumular_puntos_simple(user_id, 200, "bienvenida")
+                _acumular_puntos_simple(user_id, 50, "analisis_completado",
+                                        metadata={"analysis_id": saved_id})
+            else:
+                _acumular_puntos_simple(user_id, 50, "analisis_completado",
+                                        metadata={"analysis_id": saved_id})
+
+            # 5. Incrementar conversiones en el funnel
+            db.collection("metricas").document("funnel").set({
+                "total_conversiones": firestore.Increment(1),
+                "updated_at":         firestore.SERVER_TIMESTAMP,
+            }, merge=True)
+
+            print(f"✅ Firestore: usuario {user_id} → análisis {saved_id} | funnel conversión +1")
+
+        except Exception as fe:
+            print(f"⚠️  Firestore error en /subscribe (no crítico): {fe}")
+
         return result
+
     except Exception as e:
         print(f"Error suscripcion: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
