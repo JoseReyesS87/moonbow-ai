@@ -204,11 +204,11 @@ def _acumular_puntos_simple(user_id: str, puntos: int, motivo: str, metadata: di
         "modelo_ml.ultima_interaccion":  firestore.SERVER_TIMESTAMP,
     }
 
-    if nuevo_total >= 5000:
+    if nuevo_total >= 15:
         update_data["lealtad.tier"] = "platinum"
-    elif nuevo_total >= 2000:
+    elif nuevo_total >= 8:
         update_data["lealtad.tier"] = "gold"
-    elif nuevo_total >= 500:
+    elif nuevo_total >= 5:
         update_data["lealtad.tier"] = "silver"
 
     user_ref.update(update_data)
@@ -870,11 +870,11 @@ async def subscribe(data: EmailSubscription):
                      .collection("analisis").limit(2).stream())
             )
             if total_analisis <= 1:
-                _acumular_puntos_simple(user_id, 200, "bienvenida")
-                _acumular_puntos_simple(user_id, 50, "analisis_completado",
+                _acumular_puntos_simple(user_id, 1, "bienvenida")
+                _acumular_puntos_simple(user_id, 1, "analisis_completado",
                                         metadata={"analysis_id": saved_id})
             else:
-                _acumular_puntos_simple(user_id, 50, "analisis_completado",
+                _acumular_puntos_simple(user_id, 1, "analisis_completado",
                                         metadata={"analysis_id": saved_id})
 
             # 5. Incrementar conversiones en el funnel
