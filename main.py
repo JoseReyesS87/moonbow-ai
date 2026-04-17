@@ -1,6 +1,7 @@
 import os
 import re
 import uuid
+import random
 import requests
 import json
 import hashlib
@@ -528,6 +529,9 @@ def score_product(p, tipo_piel, needs, category):
     if p.get("image") or p.get("images"):
         score += 2
 
+    # Factor aleatorio controlado para romper empates deterministas
+    score += random.uniform(0, 3)
+
     return score
 
 
@@ -632,8 +636,21 @@ def get_shopify_recommendations(analysis):
         top_scores = [(p["title"][:40], p["_score"]) for p in scored[:3]]
         print(f"  [{category}] top: {top_scores}")
 
-        best = scored[0]
+        # Selección probabilística entre top-3 (pesos decrecientes 5:3:2)
+        top3 = scored[:3]
+        weights = [5, 3, 2][: len(top3)]
+        best_idx = random.choices(range(len(top3)), weights=weights, k=1)[0]
+        best = top3[best_idx]
         best.pop("_score", None)
+
+        # Alternative: el siguiente en el top-3 que no sea el elegido
+        alt_candidates = [p for i, p in enumerate(top3) if i != best_idx]
+        alternative = None
+        if alt_candidates:
+            alternative = alt_candidates[0]
+            alternative.pop("_score", None)
+            best["alternative"] = alternative
+
         final_products.append(best)
 
     print(f"Productos finales: {len(final_products)} / {len(ROUTINE_ORDER)} categorías")
@@ -653,10 +670,10 @@ async def debug_gemini():
 
         results     = {}
         test_models = [
-            'gemini-2.5-flash-preview-04-17',
+            'gemini-2.5-flash',
+            'gemini-2.5-pro',
             'gemini-2.0-flash',
             'gemini-1.5-flash',
-            'gemini-1.5-flash-8b',
         ]
         for model_name in test_models:
             try:
@@ -870,8 +887,7 @@ async def subscribe(data: EmailSubscription):
                      .collection("analisis").limit(2).stream())
             )
             if total_analisis <= 1:
-                _acumular_puntos_simple(user_id, 1, "bienvenida")
-                _acumular_puntos_simple(user_id, 1, "analisis_completado",
+                _acumular_puntos_simple(user_id, 5, "bienvenida_primer_analisis",
                                         metadata={"analysis_id": saved_id})
             else:
                 _acumular_puntos_simple(user_id, 1, "analisis_completado",
