@@ -887,7 +887,7 @@ async def subscribe(data: EmailSubscription):
                      .collection("analisis").limit(2).stream())
             )
             if total_analisis <= 1:
-                _acumular_puntos_simple(user_id, 5, "bienvenida_primer_analisis",
+                _acumular_puntos_simple(user_id, 1, "bienvenida_primer_analisis",
                                         metadata={"analysis_id": saved_id})
             else:
                 _acumular_puntos_simple(user_id, 1, "analisis_completado",
