@@ -3,7 +3,7 @@ import axios from 'axios';
 import {
   Camera, Sparkles, ShoppingBag, CheckCircle2, X,
   MessageCircle, Droplets, Check, Activity, Zap, Mail, ArrowRight,
-  Smile, Lock, Clock, Star, History, ChevronRight, Share2, TrendingUp
+  Smile, Lock, Clock, Star, History, ChevronRight, Share2, TrendingUp, Gift
 } from 'lucide-react';
 
 const API = 'https://moonbow-ai-782467635197.southamerica-west1.run.app';
@@ -17,11 +17,9 @@ const STEPS = [
     benefit: 'Prepara la piel para absorber mejor los siguientes pasos' },
   { label: 'Paso 4: Serum',             terms: ['Serum', 'Suero', 'Ampolla'],
     benefit: 'Tratamiento concentrado para tu tipo de piel' },
-  { label: 'Paso 5: Contorno de Ojos',  terms: ['Ojos', 'Eye', 'Contorno'],
-    benefit: 'Reduce ojeras y lineas finas alrededor del ojo' },
-  { label: 'Paso 6: Hidratante',        terms: ['Crema', 'Cream', 'Hidratante'],
+  { label: 'Paso 5: Hidratante',        terms: ['Crema', 'Cream', 'Hidratante'],
     benefit: 'Sella la hidratacion y fortalece la barrera cutanea' },
-  { label: 'Paso 7: Proteccion Solar',  terms: ['Solar', 'SPF', 'Sun'],
+  { label: 'Paso 6: Proteccion Solar',  terms: ['Solar', 'SPF', 'Sun'],
     benefit: 'Proteccion esencial contra UV y envejecimiento' }
 ];
 
@@ -32,28 +30,27 @@ function stepBenefit(step, skinTag) {
       'Paso 2: Limpiador Acuoso':  'Controla el brillo y limpia los poros',
       'Paso 3: Tonico':            'Regula la produccion de grasa',
       'Paso 4: Serum':             'Reduce poros y controla el sebo',
-      'Paso 6: Hidratante':        'Hidrata sin obstruir poros',
+      'Paso 5: Hidratante':        'Hidrata sin obstruir poros',
     },
     seca: {
       'Paso 2: Limpiador Acuoso':  'Limpia sin eliminar el manto hidrolipidico',
       'Paso 4: Serum':             'Aporta hidratacion profunda en capas',
-      'Paso 6: Hidratante':        'Nutricion intensa para pieles secas',
+      'Paso 5: Hidratante':        'Nutricion intensa para pieles secas',
     },
     mixta: {
       'Paso 2: Limpiador Acuoso':  'Equilibra zona T grasa y mejillas secas',
       'Paso 4: Serum':             'Hidrata y controla brillo a la vez',
-      'Paso 6: Hidratante':        'Textura ligera para equilibrar la piel',
+      'Paso 5: Hidratante':        'Textura ligera para equilibrar la piel',
     },
     sensible: {
       'Paso 2: Limpiador Acuoso':  'Formula suave sin fragancia ni alcohol',
       'Paso 4: Serum':             'Calma rojeces y refuerza la barrera',
-      'Paso 6: Hidratante':        'Calmante e hipoalergenico',
+      'Paso 5: Hidratante':        'Calmante e hipoalergenico',
     }
   };
   return custom[skinTag]?.[step.label] || step.benefit;
 }
 
-// MEJORA 2: Resultados esperados por tipo de piel
 function expectedResults(skinTag) {
   const results = {
     grasa:    ['Menos brillo en 7 dias', 'Poros menos visibles en 2 semanas', 'Piel mas mate y uniforme'],
@@ -64,7 +61,17 @@ function expectedResults(skinTag) {
   return results[skinTag] || ['Mejora visible en 7 dias', 'Piel mas saludable en 2 semanas', 'Resultados duraderos'];
 }
 
-// MEJORA 4: Score de piel — base real desde elasticidad
+// Texto ancla personalizado por tipo de piel — conecta score con rutina
+function anchorCopy(skinTag, score, targetScore, productCount) {
+  const copies = {
+    grasa:    `Tu piel grasa necesita ${productCount} productos especificos para controlar el sebo y reducir poros. Con esta rutina K-Beauty puedes pasar de ${score} a ${targetScore}+ en 30 dias.`,
+    seca:     `Tu piel seca necesita ${productCount} productos de hidratacion profunda para recuperar su barrera natural. Esta rutina esta disenada para llevarte de ${score} a ${targetScore}+ en 30 dias.`,
+    mixta:    `Tu piel mixta necesita ${productCount} productos que equilibren la zona T sin resecar las mejillas. Esta rutina personalizada puede llevarte de ${score} a ${targetScore}+ en 30 dias.`,
+    sensible: `Tu piel sensible necesita ${productCount} productos suaves que refuercen tu barrera cutanea sin irritarla. Esta rutina calmante puede llevarte de ${score} a ${targetScore}+ en 30 dias.`,
+  };
+  return copies[skinTag] || `Tu rutina de ${productCount} productos esta lista para mejorar tu score de ${score} a ${targetScore}+ en 30 dias.`;
+}
+
 function skinScore(result) {
   if (!result) return 55;
   const e = parseInt(result.elasticidad || 65);
@@ -83,7 +90,6 @@ function scoreLabel(score) {
   return { text: 'Necesita atencion', color: '#ff85a2' };
 }
 
-// MEJORA 5: Comparar con analisis anterior
 function compareWithLast(current, last) {
   if (!last) return null;
   const messages = [];
@@ -103,14 +109,9 @@ function compareWithLast(current, last) {
   return messages.length > 0 ? messages : null;
 }
 
-const LOADING_MESSAGES = [
-  'Detectando nivel de hidratacion...',
-  'Analizando textura de la piel...',
-  'Evaluando zona T y poros...',
-  'Estimando edad de la piel...',
-  'Calculando tu score de piel...',
-  'Preparando tu rutina personalizada...'
-];
+const LOADING_MESSAGES_PRE  = ['Detectando nivel de hidratacion...', 'Analizando textura de la piel...', 'Evaluando zona T y poros...'];
+const LOADING_MESSAGES_POST = ['Estimando edad de la piel...', 'Calculando tu score de piel...', 'Preparando tu rutina personalizada...'];
+const LOADING_MESSAGES = [...LOADING_MESSAGES_PRE, ...LOADING_MESSAGES_POST];
 
 function humanizeHydration(val) {
   if (!val) return 'Normal';
@@ -181,6 +182,16 @@ function formatDate(iso) {
   return new Date(iso).toLocaleDateString('es-CL', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+// ─── Soft capture: email guardado en localStorage para no pedirlo dos veces ───
+function getSavedEmail() {
+  try { return localStorage.getItem('moonbow_email') || ''; } catch { return ''; }
+}
+function setSavedEmail(e) {
+  try { localStorage.setItem('moonbow_email', e); } catch {}
+}
+// Alias claro
+const persistEmail = setSavedEmail;
+
 export default function App() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -201,8 +212,37 @@ export default function App() {
   const [showHistory, setShowHistory]   = useState(false);
   const [history, setHistory]           = useState([]);
   const [improvements, setImprovements] = useState(null);
+  const [analysisId, setAnalysisId]     = useState('');
+  // Map: category → alternative product (from backend's alternative field)
+  const [alternativeProducts, setAlternativeProducts] = useState({});
 
-  useEffect(() => { setHistory(loadHistory()); }, []);
+  // Soft capture (Momento 1) state
+  const [softEmail, setSoftEmail]           = useState('');
+  const [softEmailError, setSoftEmailError] = useState('');
+  const [softDone, setSoftDone]             = useState(false);
+  const [softLoading, setSoftLoading]       = useState(false);
+  const [softDismissed, setSoftDismissed]   = useState(false);
+
+  // Gate de email post-análisis (Momento 0 — email antes de ver productos)
+  const [gateEmail,      setGateEmail]      = useState('');
+  const [gateEmailError, setGateEmailError] = useState('');
+  const [gateEmailDone,  setGateEmailDone]  = useState(false);
+  const [showGate,       setShowGate]       = useState(false);
+  const [unlocked,       setUnlocked]       = useState(false);
+  const pendingDataRef = useRef(null);
+
+  useEffect(() => {
+    setHistory(loadHistory());
+    const saved = getSavedEmail();
+    if (saved) {
+      setSoftEmail(saved);
+      setEmail(saved);
+      setGateEmail(saved);
+      setSoftDone(true);
+      setGateEmailDone(true);
+      setUnlocked(true);
+    }
+  }, []);
 
   const startCamera = async () => {
     setError(null);
@@ -237,11 +277,16 @@ export default function App() {
   const capture = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current) return;
     const canvas = canvasRef.current;
-    canvas.width  = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    canvas.getContext('2d').drawImage(videoRef.current, 0, 0);
-    // MEJORA 8: calidad bajada a 0.6 para menor peso
-    const capturedImage = canvas.toDataURL('image/jpeg', 0.6);
+    const srcW = videoRef.current.videoWidth;
+    const srcH = videoRef.current.videoHeight;
+
+    // Redimensionar a máximo 800px para reducir tamaño de envío (~5x menos datos)
+    const MAX_PX = 800;
+    const scale  = Math.min(1, MAX_PX / Math.max(srcW, srcH));
+    canvas.width  = Math.round(srcW * scale);
+    canvas.height = Math.round(srcH * scale);
+    canvas.getContext('2d').drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+    const capturedImage = canvas.toDataURL('image/jpeg', 0.82);
     setImage(capturedImage);
     if (stream) stream.getTracks().forEach(t => t.stop());
     await runAnalysis(capturedImage);
@@ -251,28 +296,49 @@ export default function App() {
     setLoading(true);
     setLoadingMsg(LOADING_MESSAGES[0]);
     setError(null);
-  
+    setResult(null);
+    setProducts([]);
+    setSelectedProducts([]);
+    setImprovements(null);
+    setAnalysisId('');
+    setAlternativeProducts({});
+    setShowGate(false);
+    pendingDataRef.current = null;
+    setSoftDone(getSavedEmail() !== '');
+    setSoftDismissed(false);
+
+    const alreadyHasEmail = getSavedEmail() !== '';
+
     try {
       const blob = await (await fetch(imageData)).blob();
       const formData = new FormData();
       formData.append('file', blob, 'face.jpg');
-  
       const res = await axios.post(`${API}/analyze`, formData);
-  
       const data = res.data?.result;
       if (!data) throw new Error('Respuesta invalida');
-  
-      setResult(data);
-  
+
       const rawProducts = res.data?.products || [];
-      setProducts(rawProducts);
-  
       const visible = getVisibleProducts(rawProducts);
+      const hist = loadHistory();
+      const impr = hist[0] ? compareWithLast(data, hist[0]) : null;
+
+      setAnalysisId(res.data?.analysis_id || '');
+      setResult(data);
+      setProducts(rawProducts);
       setSelectedProducts(visible);
-  
-      saveHistory(data, visible);
-      setHistory(loadHistory());
-  
+
+      if (alreadyHasEmail) {
+        // Ya tiene email → revelar todo directo
+        setImprovements(impr);
+        setUnlocked(true);
+        saveHistory(data, visible);
+        setHistory(loadHistory());
+      } else {
+        // Sin email → guardar datos pendientes y mostrar gate
+        pendingDataRef.current = { data, rawProducts, visible, impr };
+        setShowGate(true);
+        setUnlocked(false);
+      }
     } catch (err) {
       console.error(err);
       setError('Error al analizar. Intenta nuevamente.');
@@ -280,8 +346,6 @@ export default function App() {
       setLoading(false);
     }
   };
-
-
 
   const toggleProduct = (product) => {
     setSelectedProducts(prev =>
@@ -291,26 +355,118 @@ export default function App() {
     );
   };
 
+  // Swap current product for its alternative in a given category
+  const swapToAlternative = (e, category, currentProd, altProd) => {
+    e.stopPropagation();
+    // Store new alternative (the one we just swapped away from)
+    setAlternativeProducts(prev => ({ ...prev, [category]: currentProd }));
+    // Swap in selectedProducts
+    setSelectedProducts(prev =>
+      prev.map(p => p.title === currentProd.title ? altProd : p)
+    );
+    // Swap in products list
+    setProducts(prev =>
+      prev.map(p => {
+        if (p.title === currentProd.title) {
+          return { ...altProd, alternative: currentProd };
+        }
+        return p;
+      })
+    );
+  };
+
+  // Gate submit — captura email y desbloquea resultado
+  const handleGateSubmit = async () => {
+    if (!gateEmail || !gateEmail.includes('@')) { setGateEmailError('Ingresa un email valido'); return; }
+    setGateEmailError('');
+    persistEmail(gateEmail);
+    setEmail(gateEmail);
+    setSoftEmail(gateEmail);
+    setGateEmailDone(true);
+    setSoftDone(true);
+    setShowGate(false);
+    setUnlocked(true);
+    if (pendingDataRef.current) {
+      const { data, visible, impr } = pendingDataRef.current;
+      saveHistory(data, visible);
+      setHistory(loadHistory());
+      setImprovements(impr);
+      pendingDataRef.current = null;
+    }
+    // Subscribe en background, no bloqueante
+    try {
+      await axios.post(`${API}/subscribe`, {
+        email: gateEmail, skin_type: result?.tipo_piel || '', skin_tag: result?.tipo_piel_tag || '',
+        products: selectedProducts, analisis: result?.analisis || '', hidratacion: result?.hidratacion || '',
+        sensibilidad: result?.sensibilidad || '', elasticidad: parseInt(result?.elasticidad) || 0,
+        edad_piel: parseInt(result?.edad_piel) || 0, puntos_clave: result?.puntos_clave || [],
+        rutina_sugerida: result?.rutina_sugerida || '', score: score || 0,
+        analysis_id: analysisId,
+      });
+    } catch (e) { console.error('subscribe gate (no critico):', e); }
+  };
+
+  // Saltar gate — ver resultado sin 10% OFF
+  const handleGateSkip = () => {
+    setShowGate(false);
+    setUnlocked(true);
+    if (pendingDataRef.current) {
+      const { data, visible, impr } = pendingDataRef.current;
+      saveHistory(data, visible);
+      setHistory(loadHistory());
+      setImprovements(impr);
+      pendingDataRef.current = null;
+    }
+  };
+
+  // Soft capture submit (Momento 1 — mantenido por compatibilidad, ya no se usa en el flujo principal)
+  const handleSoftSubmit = async () => {
+    if (!softEmail || !softEmail.includes('@')) { setSoftEmailError('Ingresa un email valido'); return; }
+    setSoftLoading(true); setSoftEmailError('');
+    try {
+      await axios.post(`${API}/subscribe`, {
+        email: softEmail, skin_type: result?.tipo_piel || '', skin_tag: result?.tipo_piel_tag || '',
+        products: selectedProducts, analisis: result?.analisis || '', hidratacion: result?.hidratacion || '',
+        sensibilidad: result?.sensibilidad || '', elasticidad: parseInt(result?.elasticidad) || 0,
+        edad_piel: parseInt(result?.edad_piel) || 0, puntos_clave: result?.puntos_clave || [],
+        rutina_sugerida: result?.rutina_sugerida || '', score: score || 0,
+        analysis_id: analysisId,
+      });
+      persistEmail(softEmail); setEmail(softEmail); setSoftDone(true);
+    } catch (err) { console.error(err); setSoftDone(true); }
+    finally { setSoftLoading(false); }
+  };
+
+  // Modal del carrito (Momento 2)
   const handleEmailSubmit = async () => {
-    if (!email || !email.includes('@')) { setEmailError('Ingresa un email valido'); return; }
+    // Si ya tiene email del soft capture, ir directo al carrito
+    const finalEmail = email || getSavedEmail();
+    if (!finalEmail || !finalEmail.includes('@')) {
+      setEmailError('Ingresa un email valido');
+      return;
+    }
     setEmailLoading(true);
     setEmailError('');
     try {
-      await axios.post(`${API}/subscribe`, {
-        email,
-        skin_type:       result?.tipo_piel        || '',
-        skin_tag:        result?.tipo_piel_tag     || '',
-        products:        selectedProducts,
-        // Analisis completo para personalizacion de emails
-        analisis:        result?.analisis          || '',
-        hidratacion:     result?.hidratacion       || '',
-        sensibilidad:    result?.sensibilidad      || '',
-        elasticidad:     parseInt(result?.elasticidad) || 0,
-        edad_piel:       parseInt(result?.edad_piel)   || 0,
-        puntos_clave:    result?.puntos_clave      || [],
-        rutina_sugerida: result?.rutina_sugerida   || '',
-        score:           score || 0,
-      });
+      // Solo llamar subscribe si no se llamo en el soft capture
+      if (!softDone || email !== getSavedEmail()) {
+        await axios.post(`${API}/subscribe`, {
+          email:           finalEmail,
+          skin_type:       result?.tipo_piel        || '',
+          skin_tag:        result?.tipo_piel_tag     || '',
+          products:        selectedProducts,
+          analisis:        result?.analisis          || '',
+          hidratacion:     result?.hidratacion       || '',
+          sensibilidad:    result?.sensibilidad      || '',
+          elasticidad:     parseInt(result?.elasticidad) || 0,
+          edad_piel:       parseInt(result?.edad_piel)   || 0,
+          puntos_clave:    result?.puntos_clave      || [],
+          rutina_sugerida: result?.rutina_sugerida   || '',
+          score:           score || 0,
+          analysis_id:     analysisId,
+        });
+        persistEmail(finalEmail);
+      }
       setEmailDone(true);
       setTimeout(() => { openCartUrl(); setShowModal(false); }, 1500);
     } catch (err) {
@@ -326,17 +482,16 @@ export default function App() {
     window.open(`https://moonbow.cl/cart/${valid.map(p => `${p.variant_id}:1`).join(',')}`, '_blank');
   };
 
-  // MEJORA 6: Compartir resultado
   const shareResult = () => {
-    const score = skinScore(result);
-    const text = `Probe esta IA de skincare y descubri que tengo ${result?.tipo_piel} con un score de ${score}/100! Mi rutina personalizada esta lista en Moonbow.cl`;
+    const sc = skinScore(result);
+    const text = `Probe esta IA de skincare y descubri que tengo ${result?.tipo_piel} con un score de ${sc}/100! Mi rutina personalizada esta lista en Moonbow.cl`;
     const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(text + ' -> https://moonbow.cl')}`;
     window.open(whatsappUrl, '_blank');
   };
 
   const openWhatsApp = () => {
     const msg = `Hola Moonbow! Acabo de hacer mi analisis de piel IA.\n\nResultado: ${result?.tipo_piel}\n${result?.analisis}\n\nProductos recomendados:\n${selectedProducts.map(p => `- ${p.title}`).join('\n')}`;
-    window.open(`https://wa.me/+56912345678?text=${encodeURIComponent(msg)}`, '_blank');
+    window.open(`https://wa.me/+56952923880?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   const totalPrice = selectedProducts.reduce((acc, p) => acc + parseFloat(p.price || 0), 0);
@@ -352,9 +507,9 @@ export default function App() {
   ] : [];
 
   return (
-    <div style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", maxWidth: '480px', margin: '0 auto', padding: '20px', backgroundColor: '#fffcfd', minHeight: '100vh', color: '#1a1a1a', paddingBottom: '140px' }}>
+    <div style={{ fontFamily: "'Plus Jakarta Sans', sans-serif", maxWidth: '480px', margin: '0 auto', padding: '20px', backgroundColor: '#fffcfd', minHeight: '100vh', color: '#1a1a1a', paddingBottom: '160px' }}>
 
-      {/* Header — MEJORA 9: copy mejorado */}
+      {/* Header */}
       <header style={{ textAlign: 'center', marginBottom: '20px', position: 'relative' }}>
         <div style={{ display: 'inline-block', padding: '6px 14px', background: '#fff', borderRadius: '100px', boxShadow: '0 4px 15px rgba(255,133,162,0.12)', marginBottom: '12px' }}>
           <span style={{ color: '#ff85a2', fontWeight: '800', fontSize: '11px', letterSpacing: '1.5px' }}>MOONBOW AI EXPERIENCE</span>
@@ -392,10 +547,33 @@ export default function App() {
       {/* Camara */}
       {!image && (
         <div style={{ textAlign: 'center' }}>
+
+          {/* Tips de preparacion — prominentes, antes de la camara */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '16px' }}>
+            {[
+              { emoji: '💡', title: 'Buena luz', desc: 'Luz natural o frontal directa' },
+              { emoji: '🚿', title: 'Cara lavada', desc: 'Sin maquillaje ni filtros' },
+              { emoji: '😶', title: 'Sin lentes', desc: 'Ni gorro ni accesorios' },
+              { emoji: '📱', title: 'A 30 cm', desc: 'Camara a altura de los ojos' },
+            ].map((tip, i) => (
+              <div key={i} style={{ background: 'white', border: '1.5px solid #ffdae3', borderRadius: '16px', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: '8px', textAlign: 'left' }}>
+                <span style={{ fontSize: '20px', flexShrink: 0 }}>{tip.emoji}</span>
+                <div>
+                  <p style={{ margin: 0, fontSize: '11px', fontWeight: '800', color: '#1a1a1a' }}>{tip.title}</p>
+                  <p style={{ margin: 0, fontSize: '10px', color: '#aaa', lineHeight: '1.3' }}>{tip.desc}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Boton captura — visible de inmediato, antes de la preview */}
+          <button onClick={capture} style={{ width: '100%', backgroundColor: '#1a1a1a', color: 'white', padding: '20px', borderRadius: '22px', fontSize: '16px', fontWeight: '800', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '16px' }}>
+            <Camera size={22} /> Escanear mi Piel
+          </button>
+
+          {/* Preview camara */}
           <div style={{ borderRadius: '36px', overflow: 'hidden', backgroundColor: '#000', aspectRatio: '1/1', boxShadow: '0 20px 50px rgba(255,133,162,0.15)', position: 'relative' }}>
             <video ref={videoRef} autoPlay playsInline style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' }} />
-
-            {/* Overlay guia de rostro */}
             <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
               <svg viewBox="0 0 300 360" style={{ width: '75%', maxWidth: '270px', filter: 'drop-shadow(0 0 12px rgba(255,133,162,0.5))' }}>
                 <defs>
@@ -406,22 +584,17 @@ export default function App() {
                 </defs>
                 <rect width="300" height="360" fill="rgba(0,0,0,0.42)" mask="url(#faceMask)" />
                 <ellipse cx="150" cy="175" rx="108" ry="138" fill="none" stroke="#ff85a2" strokeWidth="2.5" strokeDasharray="9 5" opacity="0.9" />
-                {/* Marcas de alineacion */}
                 <line x1="42" y1="175" x2="18" y2="175" stroke="#ff85a2" strokeWidth="2" opacity="0.6" />
                 <line x1="258" y1="175" x2="282" y2="175" stroke="#ff85a2" strokeWidth="2" opacity="0.6" />
                 <line x1="150" y1="37" x2="150" y2="15" stroke="#ff85a2" strokeWidth="2" opacity="0.6" />
                 <line x1="150" y1="313" x2="150" y2="338" stroke="#ff85a2" strokeWidth="2" opacity="0.6" />
               </svg>
               <div style={{ marginTop: '10px', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', borderRadius: '100px', padding: '8px 20px', border: '1px solid rgba(255,133,162,0.45)' }}>
-                <span style={{ color: 'white', fontSize: '13px', fontWeight: '700' }}>👤 Pon aquí tu rostro</span>
+                <span style={{ color: 'white', fontSize: '13px', fontWeight: '700' }}>Encuadra tu rostro aqui</span>
               </div>
             </div>
           </div>
           {error && <p style={{ color: '#ff4444', marginTop: '12px', fontSize: '14px' }}>{error}</p>}
-          <p style={{ color: '#bbb', fontSize: '13px', margin: '14px 0 8px' }}>Buena iluminacion frontal, sin lentes ni gorro</p>
-          <button onClick={capture} style={{ width: '100%', backgroundColor: '#1a1a1a', color: 'white', padding: '20px', borderRadius: '22px', fontSize: '16px', fontWeight: '800', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px' }}>
-            <Camera size={22} /> Escanear mi Piel
-          </button>
         </div>
       )}
 
@@ -433,7 +606,7 @@ export default function App() {
           </div>
 
           {!loading && (
-            <button onClick={() => { setImage(null); setResult(null); setProducts([]); setSelectedProducts([]); setError(null); setEmailDone(false); setImprovements(null); }}
+            <button onClick={() => { setImage(null); setResult(null); setProducts([]); setSelectedProducts([]); setError(null); setEmailDone(false); setImprovements(null); setSoftDone(getSavedEmail() !== ''); setSoftDismissed(false); }}
               style={{ width: '100%', background: '#f5f5f5', color: '#777', border: 'none', padding: '11px', borderRadius: '14px', fontWeight: '600', cursor: 'pointer', marginBottom: '16px', fontSize: '13px' }}>
               Tomar otra foto
             </button>
@@ -458,21 +631,162 @@ export default function App() {
             </div>
           )}
 
-          {result && !loading && (
+          {/* ── GATE: resultado parcial + captura de email con incentivo ── */}
+          {result && !loading && showGate && (
+            <div style={{ animation: 'fadeIn 0.5s ease' }}>
+
+              {/* Score visible — hook aspiracional */}
+              <div style={{ background: 'white', borderRadius: '24px', padding: '20px', marginBottom: '18px', border: '1px solid #f0f0f0' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <div>
+                    <p style={{ margin: 0, fontSize: '12px', color: '#bbb', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Score de tu piel</p>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px', marginTop: '4px' }}>
+                      <span style={{ fontSize: '32px', fontWeight: '900', color: scoreInfo.color }}>{score}</span>
+                      <span style={{ fontSize: '16px', fontWeight: '600', color: '#ccc' }}>/100</span>
+                      <span style={{ fontSize: '13px', fontWeight: '800', color: scoreInfo.color, marginLeft: '4px' }}>{scoreInfo.text}</span>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <p style={{ margin: 0, fontSize: '11px', color: '#bbb' }}>Meta con tu rutina</p>
+                    <p style={{ margin: '2px 0 0', fontSize: '20px', fontWeight: '900', color: '#22c55e' }}>{targetScore}+</p>
+                  </div>
+                </div>
+                <div style={{ background: '#f5f5f5', borderRadius: '100px', height: '8px', overflow: 'hidden' }}>
+                  <div style={{ width: `${score}%`, height: '100%', background: `linear-gradient(90deg, #ff85a2, ${scoreInfo.color})`, borderRadius: '100px', transition: 'width 1s ease' }} />
+                </div>
+                <p style={{ margin: '8px 0 0', fontSize: '12px', color: '#777' }}>
+                  Tienes <strong>{result.tipo_piel}</strong> · Tu rutina personalizada esta lista abajo
+                </p>
+              </div>
+
+              {/* Gate con incentivo */}
+              <div style={{ background: 'white', border: '2px solid #ffc2d4', borderRadius: '28px', overflow: 'hidden', marginBottom: '16px' }}>
+
+                {/* Header — foco en la rutina, descuento como bonus */}
+                <div style={{ background: '#ff85a2', padding: '20px 22px 18px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                    <Sparkles size={20} color="white" />
+                    <span style={{ fontSize: '17px', fontWeight: '900', color: 'white', lineHeight: '1.2' }}>Tu rutina personalizada esta lista</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: '13px', color: 'rgba(255,255,255,0.9)', lineHeight: '1.5' }}>
+                    Recibela completa + <strong style={{ color: 'white' }}>10% OFF</strong> en tu primera compra
+                  </p>
+                </div>
+
+                <div style={{ padding: '18px 22px' }}>
+
+                  {/* Urgencia real — conecta con history */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '7px', background: '#fff8e6', border: '1px solid #fde68a', borderRadius: '10px', padding: '9px 12px', marginBottom: '16px' }}>
+                    <span style={{ fontSize: '14px' }}>🔒</span>
+                    <span style={{ fontSize: '12px', color: '#92400e', fontWeight: '600' }}>Guardamos tu diagnostico y rutina en tu email</span>
+                  </div>
+
+                  {/* Checklist de valor */}
+                  {[
+                    `Rutina de ${selectedProducts.length} productos para tu ${result.tipo_piel?.toLowerCase()}`,
+                    `Como subir tu score de ${score} a ${targetScore}+ en 30 dias`,
+                    'Seguimiento de tu evolucion en el tiempo',
+                  ].map((item, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                      <div style={{ width: '18px', height: '18px', background: '#fff0f5', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        <Check size={10} color="#ff85a2" strokeWidth={3} />
+                      </div>
+                      <span style={{ fontSize: '13px', color: '#555', fontWeight: '500' }}>{item}</span>
+                    </div>
+                  ))}
+
+                  {/* Input con icono dentro */}
+                  <div style={{ position: 'relative', marginTop: '14px', marginBottom: '4px' }}>
+                    <div style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
+                      <Mail size={16} color="#ffb3cc" />
+                    </div>
+                    <input
+                      type="email"
+                      value={gateEmail}
+                      onChange={e => { setGateEmail(e.target.value); setGateEmailError(''); }}
+                      placeholder="Tu email para recibir tu rutina"
+                      autoFocus
+                      style={{ width: '100%', padding: '14px 16px 14px 40px', borderRadius: '14px', border: gateEmailError ? '2px solid #ff4444' : '2px solid #ffdae3', fontSize: '14px', outline: 'none', background: '#fafafa', boxSizing: 'border-box', fontWeight: '500', color: '#1a1a1a' }}
+                    />
+                  </div>
+                  {gateEmailError && <p style={{ color: '#ff4444', fontSize: '11px', margin: '4px 0 0' }}>{gateEmailError}</p>}
+
+                  {/* Prueba social */}
+                  <p style={{ margin: '10px 0 0', fontSize: '11px', color: '#bbb', textAlign: 'center' }}>
+                    🔥 Rutinas personalizadas según tu tipo de piel
+                  </p>
+
+                  {/* CTA principal — foco en accion, descuento secundario */}
+                  <button
+                    onClick={handleGateSubmit}
+                    style={{ width: '100%', background: '#ff85a2', color: 'white', border: 'none', padding: '17px', borderRadius: '14px', fontWeight: '900', fontSize: '16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px', marginTop: '14px' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>Ver mi rutina personalizada <ArrowRight size={17} /></span>
+                    <span style={{ fontSize: '11px', fontWeight: '600', opacity: 0.85 }}>incluye 10% OFF en tu primera compra</span>
+                  </button>
+
+                  {/* Skip — visible pero discreto */}
+                  <button
+                    onClick={handleGateSkip}
+                    style={{ width: '100%', background: 'transparent', color: '#bbb', border: 'none', padding: '12px 0 0', cursor: 'pointer', fontSize: '11px', fontWeight: '600', textAlign: 'center' }}>
+                    Ver sin descuento
+                  </button>
+                </div>
+              </div>
+
+              {/* Teaser productos difuminado */}
+              <div style={{ position: 'relative', borderRadius: '24px', overflow: 'hidden' }}>
+                <div style={{ filter: 'blur(5px)', pointerEvents: 'none', userSelect: 'none', opacity: 0.55 }}>
+                  {[1, 2, 3].map(i => (
+                    <div key={i} style={{ display: 'flex', gap: '13px', padding: '14px', background: i % 2 === 0 ? '#fafafa' : 'white', borderRadius: '20px', border: '2px solid #efefef', marginBottom: '10px' }}>
+                      <div style={{ width: '60px', height: '60px', borderRadius: '14px', background: '#f0e8ec', flexShrink: 0 }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ height: '9px', background: '#ffdae3', borderRadius: '6px', width: '55%', marginBottom: '8px' }} />
+                        <div style={{ height: '13px', background: '#f0f0f0', borderRadius: '6px', width: '80%', marginBottom: '8px' }} />
+                        <div style={{ height: '9px', background: '#f5f5f5', borderRadius: '6px', width: '45%', marginBottom: '8px' }} />
+                        <div style={{ height: '15px', background: '#ffdae3', borderRadius: '6px', width: '28%' }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,252,253,0.65)', backdropFilter: 'blur(2px)' }}>
+                  <div style={{ background: 'white', border: '1.5px solid #ffdae3', borderRadius: '20px', padding: '18px 24px', textAlign: 'center', maxWidth: '240px' }}>
+                    <span style={{ fontSize: '22px', display: 'block', marginBottom: '8px' }}>🔒</span>
+                    <p style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: '800' }}>{selectedProducts.length} productos seleccionados</p>
+                    <p style={{ margin: '0 0 12px', fontSize: '12px', color: '#999' }}>Ingresa tu email arriba para ver tu rutina</p>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          )}
+
+          {/* ── RESULTADO DESBLOQUEADO ── */}
+          {result && !loading && !showGate && (
             <div>
 
-              {/* MEJORA 5: Banner de mejora vs analisis anterior */}
+              {/* Banner mejora vs analisis anterior */}
               {improvements && improvements.length > 0 && (
-                <div style={{ background: 'linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%)', border: '1.5px solid #86efac', borderRadius: '20px', padding: '14px 18px', marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '10px', animation: 'fadeIn 0.5s ease' }}>
+                <div style={{ background: '#f0fdf4', border: '1.5px solid #86efac', borderRadius: '20px', padding: '14px 18px', marginBottom: '18px', display: 'flex', alignItems: 'center', gap: '10px', animation: 'fadeIn 0.5s ease' }}>
                   <TrendingUp size={18} color="#22c55e" style={{ flexShrink: 0 }} />
                   <div>
                     <p style={{ margin: 0, fontWeight: '800', fontSize: '13px', color: '#15803d' }}>Tu piel mejoro desde la ultima vez</p>
-                    <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#4ade80' }}>{improvements.join(' · ')}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#16a34a' }}>{improvements.join(' · ')}</p>
                   </div>
                 </div>
               )}
 
-              {/* MEJORA 4: Score de piel */}
+              {/* Confirmacion 10% OFF si vino del gate */}
+              {gateEmailDone && gateEmail && (
+                <div style={{ background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: '18px', padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '10px', animation: 'fadeIn 0.4s ease' }}>
+                  <CheckCircle2 size={18} color="#22c55e" style={{ flexShrink: 0 }} />
+                  <div>
+                    <p style={{ margin: 0, fontSize: '13px', color: '#15803d', fontWeight: '700' }}>10% OFF enviado a {gateEmail}</p>
+                    <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#16a34a' }}>Revisa tu bandeja de entrada</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Score */}
               <div style={{ background: 'white', borderRadius: '24px', padding: '20px', marginBottom: '18px', border: '1px solid #f0f0f0' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
                   <div>
@@ -488,11 +802,17 @@ export default function App() {
                     <p style={{ margin: '2px 0 0', fontSize: '20px', fontWeight: '900', color: '#22c55e' }}>{targetScore}+</p>
                   </div>
                 </div>
-                {/* Barra de progreso */}
                 <div style={{ background: '#f5f5f5', borderRadius: '100px', height: '8px', overflow: 'hidden' }}>
                   <div style={{ width: `${score}%`, height: '100%', background: `linear-gradient(90deg, #ff85a2, ${scoreInfo.color})`, borderRadius: '100px', transition: 'width 1s ease' }} />
                 </div>
                 <p style={{ margin: '8px 0 0', fontSize: '11px', color: '#bbb' }}>Siguiendo esta rutina puedes llegar a {targetScore}+ en 30 dias</p>
+              </div>
+
+              {/* ── ANCLA: conecta el score con la rutina ── */}
+              <div style={{ background: '#fff0f5', border: '1.5px solid #ffdae3', borderRadius: '20px', padding: '16px 18px', marginBottom: '18px', animation: 'fadeIn 0.6s ease' }}>
+                <p style={{ margin: 0, fontSize: '14px', color: '#1a1a1a', lineHeight: '1.6', fontWeight: '500' }}>
+                  {anchorCopy(result.tipo_piel_tag, score, targetScore, selectedProducts.length)}
+                </p>
               </div>
 
               {/* Badges 2x2 */}
@@ -517,13 +837,13 @@ export default function App() {
                 {result.puntos_clave && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
                     {result.puntos_clave.map((pt, i) => (
-                      <span key={i} style={{ background: '#fff5f7', color: '#ff85a2', padding: '5px 11px', borderRadius: '9px', fontSize: '12px', fontWeight: '700' }}>v {pt}</span>
+                      <span key={i} style={{ background: '#fff5f7', color: '#ff85a2', padding: '5px 11px', borderRadius: '9px', fontSize: '12px', fontWeight: '700' }}>{pt}</span>
                     ))}
                   </div>
                 )}
               </div>
 
-              {/* MEJORA 2: Resultados esperados */}
+              {/* Resultados esperados */}
               <div style={{ background: '#f8fff8', border: '1.5px solid #bbf7d0', borderRadius: '22px', padding: '18px 20px', marginBottom: '20px' }}>
                 <p style={{ margin: '0 0 12px', fontSize: '13px', fontWeight: '800', color: '#1a1a1a' }}>Si sigues esta rutina:</p>
                 {expectedResults(result.tipo_piel_tag).map((r, i) => (
@@ -547,7 +867,7 @@ export default function App() {
                 </div>
               )}
 
-              {/* Lista productos con beneficio personalizado */}
+              {/* Lista productos */}
               {products.length > 0 ? (
                 <div style={{ marginBottom: '20px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
@@ -560,6 +880,10 @@ export default function App() {
                       if (!prod) return null;
                       const isSel = !!selectedProducts.find(s => s.title === prod.title);
                       const benefit = stepBenefit(step, result.tipo_piel_tag);
+                      const hasAlt = !!prod.alternative;
+                      const skinLabel = result.tipo_piel_tag
+                        ? { grasa: 'piel grasa', seca: 'piel seca', mixta: 'piel mixta', sensible: 'piel sensible' }[result.tipo_piel_tag] || result.tipo_piel_tag
+                        : null;
                       return (
                         <div key={idx} onClick={() => toggleProduct(prod)} style={{
                           display: 'flex', gap: '13px', padding: '14px',
@@ -567,25 +891,41 @@ export default function App() {
                           borderRadius: '20px',
                           border: `2px solid ${isSel ? '#ff85a2' : '#efefef'}`,
                           cursor: 'pointer', transition: 'all 0.15s ease',
-                          opacity: isSel ? 1 : 0.45
+                          opacity: isSel ? 1 : 0.45,
+                          flexDirection: 'column'
                         }}>
-                          <div style={{ position: 'relative', flexShrink: 0 }}>
-                            {prod.image
-                              ? <img src={prod.image} alt={prod.title} style={{ width: '60px', height: '60px', borderRadius: '14px', objectFit: 'cover' }} />
-                              : <div style={{ width: '60px', height: '60px', borderRadius: '14px', background: '#f0f0f0' }} />
-                            }
-                            {isSel && (
-                              <div style={{ position: 'absolute', top: '-5px', right: '-5px', background: '#ff85a2', borderRadius: '50%', width: '19px', height: '19px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid white' }}>
-                                <Check size={10} color="white" strokeWidth={4} />
-                              </div>
-                            )}
+                          <div style={{ display: 'flex', gap: '13px' }}>
+                            <div style={{ position: 'relative', flexShrink: 0 }}>
+                              {prod.image
+                                ? <img src={prod.image} alt={prod.title} style={{ width: '60px', height: '60px', borderRadius: '14px', objectFit: 'cover' }} />
+                                : <div style={{ width: '60px', height: '60px', borderRadius: '14px', background: '#f0f0f0' }} />
+                              }
+                              {isSel && (
+                                <div style={{ position: 'absolute', top: '-5px', right: '-5px', background: '#ff85a2', borderRadius: '50%', width: '19px', height: '19px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid white' }}>
+                                  <Check size={10} color="white" strokeWidth={4} />
+                                </div>
+                              )}
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <p style={{ fontSize: '9px', fontWeight: '800', color: '#ff85a2', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{step.label}</p>
+                              <p style={{ fontSize: '12px', fontWeight: '700', margin: '0 0 2px', lineHeight: '1.2', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{prod.title}</p>
+                              {skinLabel && (
+                                <p style={{ fontSize: '10px', color: '#ff85a2', margin: '0 0 3px', fontWeight: '600' }}>
+                                  Seleccionado para {skinLabel}
+                                </p>
+                              )}
+                              <p style={{ fontSize: '11px', color: '#999', margin: '0 0 5px', lineHeight: '1.3' }}>{benefit}</p>
+                              <p style={{ fontSize: '14px', fontWeight: '900', margin: 0 }}>${Math.round(parseFloat(prod.price)).toLocaleString('es-CL')}</p>
+                            </div>
                           </div>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <p style={{ fontSize: '9px', fontWeight: '800', color: '#ff85a2', margin: '0 0 3px', textTransform: 'uppercase', letterSpacing: '0.3px' }}>{step.label}</p>
-                            <p style={{ fontSize: '12px', fontWeight: '700', margin: '0 0 3px', lineHeight: '1.2', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{prod.title}</p>
-                            <p style={{ fontSize: '11px', color: '#999', margin: '0 0 5px', lineHeight: '1.3' }}>{benefit}</p>
-                            <p style={{ fontSize: '14px', fontWeight: '900', margin: 0 }}>${Math.round(parseFloat(prod.price)).toLocaleString('es-CL')}</p>
-                          </div>
+                          {hasAlt && isSel && (
+                            <button
+                              onClick={(e) => swapToAlternative(e, prod.category, prod, prod.alternative)}
+                              style={{ alignSelf: 'flex-start', background: '#f5f5f5', border: '1px solid #e0e0e0', borderRadius: '10px', padding: '5px 12px', fontSize: '11px', fontWeight: '700', color: '#666', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}
+                            >
+                              <span>↩</span> Ver otra opcion
+                            </button>
+                          )}
                         </div>
                       );
                     })}
@@ -597,14 +937,14 @@ export default function App() {
                 </div>
               )}
 
-              {/* MEJORA 6: Boton compartir */}
+              {/* Compartir */}
               <button onClick={shareResult}
                 style={{ width: '100%', background: 'white', color: '#1a1a1a', border: '1.5px solid #eee', padding: '14px', borderRadius: '18px', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px', fontSize: '14px', marginBottom: '12px' }}>
                 <Share2 size={16} color="#ff85a2" /> Compartir mi resultado
               </button>
 
-              {/* WhatsApp CTA fuerte */}
-              <div style={{ background: 'linear-gradient(135deg, #f0fdf4 0%, #fff 100%)', border: '1.5px solid #bbf7d0', borderRadius: '24px', padding: '20px', marginBottom: '16px' }}>
+              {/* WhatsApp */}
+              <div style={{ background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: '24px', padding: '20px', marginBottom: '16px' }}>
                 <p style={{ fontSize: '15px', fontWeight: '800', margin: '0 0 6px', color: '#1a1a1a' }}>
                   Quieres que una experta revise tu analisis?
                 </p>
@@ -620,26 +960,26 @@ export default function App() {
           )}
         </div>
       )}
-
-      {/* MEJORA 1: Boton flotante con urgencia */}
-      {selectedProducts.length > 0 && result && !loading && (
+      {/* ── BOTTOM BAR — oculto durante el gate ── */}
+      {selectedProducts.length > 0 && result && !loading && !showGate && (
         <div style={{ position: 'fixed', bottom: '20px', left: '20px', right: '20px', zIndex: 100 }}>
           <button onClick={() => setShowModal(true)}
             style={{ width: '100%', background: '#1a1a1a', color: 'white', border: 'none', padding: '16px 22px', borderRadius: '26px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 15px 40px rgba(0,0,0,0.25)', cursor: 'pointer' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '11px' }}>
               <ShoppingBag size={19} color="#ff85a2" />
               <div style={{ textAlign: 'left' }}>
-                {/* MEJORA 1: Copy de urgencia */}
-                <p style={{ margin: 0, fontWeight: '800', fontSize: '14px' }}>Empieza a mejorar tu piel hoy</p>
+                <p style={{ margin: 0, fontWeight: '800', fontSize: '14px' }}>Ver mi rutina de {selectedProducts.length} productos</p>
                 <p style={{ margin: 0, fontSize: '11px', color: '#ff85a2' }}>Resultados visibles en 7-14 dias</p>
               </div>
             </div>
-            <span style={{ fontWeight: '900', fontSize: '16px' }}>${Math.round(totalPrice).toLocaleString('es-CL')}</span>
+            <div style={{ background: '#ff85a2', borderRadius: '12px', padding: '6px 12px' }}>
+              <ArrowRight size={17} color="white" />
+            </div>
           </button>
         </div>
       )}
 
-      {/* Modal con mejor copy de email */}
+      {/* ── MODAL DEL CARRITO (Momento 2) ── */}
       {showModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', zIndex: 200, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
           <div style={{ background: 'white', borderRadius: '36px 36px 0 0', padding: '32px 24px 44px', width: '100%', maxWidth: '480px', animation: 'slideUp 0.3s ease', position: 'relative' }}>
@@ -659,54 +999,65 @@ export default function App() {
               </div>
             ) : (
               <>
-                <h3 style={{ fontSize: '17px', fontWeight: '800', margin: '0 0 4px' }}>Tu Rutina para {result?.tipo_piel}</h3>
-                <p style={{ fontSize: '12px', color: '#999', margin: '0 0 18px' }}>{selectedProducts.length} productos personalizados</p>
+                {/* ── ENCABEZADO ── */}
+                <h3 style={{ fontSize: '17px', fontWeight: '800', margin: '0 0 2px' }}>Tu Rutina para {result?.tipo_piel}</h3>
+                <p style={{ fontSize: '12px', color: '#999', margin: '0 0 20px' }}>{selectedProducts.length} productos · ${Math.round(totalPrice).toLocaleString('es-CL')} total</p>
 
-                <div style={{ borderTop: '1px solid #f5f5f5', borderBottom: '1px solid #f5f5f5', padding: '12px 0', marginBottom: '18px' }}>
-                  {selectedProducts.map((p, i) => (
-                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '12px' }}>
-                      <span style={{ color: '#555', flex: 1, marginRight: '8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</span>
-                      <span style={{ fontWeight: '700', flexShrink: 0 }}>${Math.round(parseFloat(p.price)).toLocaleString('es-CL')}</span>
+                {/* ── EMAIL — ARRIBA Y PROMINENTE ── */}
+                <div style={{ background: '#fff0f5', border: '2px solid #ffc2d4', borderRadius: '22px', padding: '20px', marginBottom: '16px' }}>
+                  {/* Cabecera con icono grande */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+                    <div style={{ width: '38px', height: '38px', background: '#ff85a2', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Mail size={18} color="white" />
                     </div>
-                  ))}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0 0', fontWeight: '900', fontSize: '14px', borderTop: '1px solid #f5f5f5', marginTop: '6px' }}>
-                    <span>Total</span>
-                    <span style={{ color: '#ff85a2' }}>${Math.round(totalPrice).toLocaleString('es-CL')}</span>
+                    <div>
+                      <p style={{ margin: 0, fontSize: '15px', fontWeight: '900', color: '#1a1a1a', lineHeight: '1.2' }}>
+                        {gateEmailDone ? 'Tu diagnostico esta listo' : 'Recibe tu rutina completa'}
+                      </p>
+                      <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#ff85a2', fontWeight: '700' }}>
+                        Manana y noche · Tips · Seguimiento
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                {/* MEJORA 7: Email con valor extra real */}
-                <div style={{ background: '#fff5f7', borderRadius: '20px', padding: '18px', marginBottom: '14px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '8px' }}>
-                    <Mail size={14} color="#ff85a2" />
-                    <span style={{ fontSize: '13px', fontWeight: '800' }}>Guarda tu analisis gratis</span>
-                  </div>
-                  {/* MEJORA 7: Lista de beneficios del email */}
-                  {['Tu diagnostico completo + rutina manana y noche', 'Tips personalizados para tu ' + (result?.tipo_piel?.toLowerCase() || 'piel'), 'Seguimiento de tu evolucion mes a mes'].map((item, i) => (
-                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginBottom: '5px' }}>
-                      <Check size={12} color="#ff85a2" style={{ marginTop: '2px', flexShrink: 0 }} />
-                      <span style={{ fontSize: '11px', color: '#777', lineHeight: '1.4' }}>{item}</span>
-                    </div>
-                  ))}
+                  {/* Campo email grande */}
                   <input
                     type="email"
                     value={email}
                     onChange={e => { setEmail(e.target.value); setEmailError(''); }}
                     placeholder="tu@email.com"
-                    style={{ width: '100%', padding: '11px 14px', borderRadius: '12px', border: emailError ? '1.5px solid #ff4444' : '1.5px solid #ffdae3', fontSize: '14px', outline: 'none', background: 'white', boxSizing: 'border-box', marginTop: '10px' }}
+                    style={{ width: '100%', padding: '14px 16px', borderRadius: '14px', border: emailError ? '2px solid #ff4444' : '2px solid #ffc2d4', fontSize: '15px', outline: 'none', background: 'white', boxSizing: 'border-box', fontWeight: '600', color: '#1a1a1a' }}
                   />
-                  {emailError && <p style={{ color: '#ff4444', fontSize: '11px', margin: '5px 0 0' }}>{emailError}</p>}
+                  {emailError && <p style={{ color: '#ff4444', fontSize: '11px', margin: '6px 0 0' }}>{emailError}</p>}
+                  <p style={{ fontSize: '10px', color: '#ccc', margin: '8px 0 0', textAlign: 'center' }}>Sin spam. Solo tu rutina personalizada.</p>
                 </div>
 
+                {/* ── CTA PRINCIPAL ── */}
                 <button onClick={handleEmailSubmit} disabled={emailLoading}
-                  style={{ width: '100%', background: '#ff85a2', color: 'white', border: 'none', padding: '17px', borderRadius: '20px', fontWeight: '800', fontSize: '15px', cursor: emailLoading ? 'not-allowed' : 'pointer', opacity: emailLoading ? 0.8 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px', marginBottom: '10px' }}>
-                  {emailLoading ? 'Procesando...' : <><span>Ir al Carrito de Moonbow</span><ArrowRight size={17} /></>}
+                  style={{ width: '100%', background: emailLoading ? '#ffb3cc' : '#ff85a2', color: 'white', border: 'none', padding: '18px', borderRadius: '20px', fontWeight: '900', fontSize: '16px', cursor: emailLoading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '9px', marginBottom: '8px', letterSpacing: '-0.2px' }}>
+                  {emailLoading ? 'Procesando...' : <><span>Guardar y ir al Carrito</span><ArrowRight size={18} /></>}
                 </button>
 
+                {/* ── SKIP — pequeño y discreto ── */}
                 <button onClick={() => { openCartUrl(); setShowModal(false); }}
-                  style={{ width: '100%', background: 'transparent', color: '#ccc', border: 'none', padding: '10px', cursor: 'pointer', fontSize: '12px', fontWeight: '600' }}>
-                  Ir al carrito sin guardar mi analisis
+                  style={{ width: '100%', background: 'transparent', color: '#bbb', border: 'none', padding: '10px', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>
+                  Ir al carrito sin guardar
                 </button>
+
+                {/* ── RESUMEN PRODUCTOS — colapsado visualmente, secundario ── */}
+                <div style={{ marginTop: '20px', borderTop: '1px solid #f5f5f5', paddingTop: '16px' }}>
+                  <p style={{ fontSize: '11px', fontWeight: '700', color: '#ccc', textTransform: 'uppercase', letterSpacing: '0.5px', margin: '0 0 10px' }}>Detalle de tu rutina</p>
+                  {selectedProducts.map((p, i) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: '12px', borderBottom: i < selectedProducts.length - 1 ? '1px solid #f9f9f9' : 'none' }}>
+                      <span style={{ color: '#888', flex: 1, marginRight: '8px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.title}</span>
+                      <span style={{ fontWeight: '700', color: '#555', flexShrink: 0 }}>${Math.round(parseFloat(p.price)).toLocaleString('es-CL')}</span>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0 0', fontWeight: '900', fontSize: '14px' }}>
+                    <span>Total</span>
+                    <span style={{ color: '#ff85a2' }}>${Math.round(totalPrice).toLocaleString('es-CL')}</span>
+                  </div>
+                </div>
               </>
             )}
           </div>
