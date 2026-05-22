@@ -5,7 +5,9 @@ import random
 import requests
 import json
 import hashlib
+import asyncio
 import uvicorn
+import httpx
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -423,8 +425,8 @@ def extract_skin_needs(analysis):
     return list(set(needs))
 
 
-# --- FUNCION PARA OBTENER LOS PRODUCTOS DE LAS COLECCIONES SHOPIFY ---
-def get_products_by_collection(handle):
+# --- FUNCION PARA OBTENER LOS PRODUCTOS DE LAS COLECCIONES SHOPIFY (ASYNC) ---
+async def get_products_by_collection_async(handle: str, client: httpx.AsyncClient):
     headers = {
         "X-Shopify-Access-Token": SHOPIFY_TOKEN,
         "Content-Type": "application/json"
@@ -434,7 +436,7 @@ def get_products_by_collection(handle):
         collection_id   = None
         collection_type = None
 
-        res = requests.get(
+        res = await client.get(
             f"{BASE_URL}/custom_collections.json?handle={handle}",
             headers=headers,
             timeout=10
@@ -446,7 +448,7 @@ def get_products_by_collection(handle):
                 collection_type = "custom"
 
         if not collection_id:
-            res = requests.get(
+            res = await client.get(
                 f"{BASE_URL}/smart_collections.json?handle={handle}",
                 headers=headers,
                 timeout=10
@@ -463,7 +465,7 @@ def get_products_by_collection(handle):
 
         print(f"  ✅ Colección '{handle}' [{collection_type}] id={collection_id}")
 
-        res = requests.get(
+        res = await client.get(
             f"{BASE_URL}/products.json?collection_id={collection_id}&limit=50",
             headers=headers,
             timeout=10
@@ -472,6 +474,37 @@ def get_products_by_collection(handle):
         print(f"     → {len(products)} productos encontrados")
         return products
 
+    except Exception as e:
+        print(f"  ❌ Error colección '{handle}': {e}")
+        return []
+
+
+# Wrapper síncrono para compatibilidad con código legacy (debug routes, etc.)
+def get_products_by_collection(handle):
+    headers = {
+        "X-Shopify-Access-Token": SHOPIFY_TOKEN,
+        "Content-Type": "application/json"
+    }
+    try:
+        collection_id   = None
+        collection_type = None
+        res = requests.get(f"{BASE_URL}/custom_collections.json?handle={handle}", headers=headers, timeout=10)
+        if res.status_code == 200:
+            custom = res.json().get("custom_collections", [])
+            if custom:
+                collection_id   = custom[0]["id"]
+                collection_type = "custom"
+        if not collection_id:
+            res = requests.get(f"{BASE_URL}/smart_collections.json?handle={handle}", headers=headers, timeout=10)
+            if res.status_code == 200:
+                smart = res.json().get("smart_collections", [])
+                if smart:
+                    collection_id   = smart[0]["id"]
+                    collection_type = "smart"
+        if not collection_id:
+            return []
+        res = requests.get(f"{BASE_URL}/products.json?collection_id={collection_id}&limit=50", headers=headers, timeout=10)
+        return res.json().get("products", [])
     except Exception as e:
         print(f"  ❌ Error colección '{handle}': {e}")
         return []
@@ -559,7 +592,7 @@ def build_product_entry(p, category):
     }
 
 
-def get_shopify_recommendations(analysis):
+async def get_shopify_recommendations(analysis):
     tipo_piel = analysis.get("tipo_piel_tag", "").lower().strip()
     needs     = extract_skin_needs(analysis)
 
@@ -570,20 +603,37 @@ def get_shopify_recommendations(analysis):
         n in ["poros", "sebo", "acne"] for n in needs
     )
 
+    # Determinar qué categorías procesar
+    categories_to_fetch = [
+        cat for cat in ROUTINE_ORDER
+        if not (cat == "oil-cleanser" and not include_oil)
+        and COLLECTIONS.get(cat)
+    ]
+
+    # ── PARALELIZAR: buscar todas las colecciones al mismo tiempo ──
+    async with httpx.AsyncClient() as http_client:
+        tasks = {
+            cat: asyncio.gather(*[
+                get_products_by_collection_async(handle, http_client)
+                for handle in COLLECTIONS[cat]
+            ])
+            for cat in categories_to_fetch
+        }
+        results = {
+            cat: await task
+            for cat, task in tasks.items()
+        }
+
+    # Procesar resultados (misma lógica de scoring que antes)
     final_products = []
 
     for category in ROUTINE_ORDER:
-
-        if category == "oil-cleanser" and not include_oil:
-            continue
-
-        handles = COLLECTIONS.get(category, [])
-        if not handles:
+        if category not in results:
             continue
 
         all_products = []
-        for handle in handles:
-            all_products.extend(get_products_by_collection(handle))
+        for product_list in results[category]:
+            all_products.extend(product_list)
 
         if not all_products:
             print(f"⚠️  Sin productos en categoría: {category}")
@@ -636,14 +686,12 @@ def get_shopify_recommendations(analysis):
         top_scores = [(p["title"][:40], p["_score"]) for p in scored[:3]]
         print(f"  [{category}] top: {top_scores}")
 
-        # Selección probabilística entre top-3 (pesos decrecientes 5:3:2)
-        top3 = scored[:3]
+        top3    = scored[:3]
         weights = [5, 3, 2][: len(top3)]
         best_idx = random.choices(range(len(top3)), weights=weights, k=1)[0]
         best = top3[best_idx]
         best.pop("_score", None)
 
-        # Alternative: el siguiente en el top-3 que no sea el elegido
         alt_candidates = [p for i, p in enumerate(top3) if i != best_idx]
         alternative = None
         if alt_candidates:
@@ -815,7 +863,7 @@ async def analyze_skin(file: UploadFile = File(...)):
             f"Edad:{analysis_data.get('edad_piel')}"
         )
 
-        recommendations = get_shopify_recommendations(analysis_data)
+        recommendations = await get_shopify_recommendations(analysis_data)
 
         # ── FIRESTORE: contar análisis totales para métrica de funnel ──
         analysis_id = _new_id()
